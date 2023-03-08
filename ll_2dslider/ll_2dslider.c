@@ -859,10 +859,20 @@ void ll_2dslider_ctrlshift(t_ll_2dslider *x, t_symbol *s, short ac, t_atom *av){
     jbox_redraw((t_jbox *)x);
 }
 void ll_2dslider_outlet_chars(t_ll_2dslider *x, t_symbol *s, char *array){
-    t_atom buf[x->ll_amount];
+
+    // 3/8/2023: KSP: Previous code was doing this, which is now allowed in Microsoft C compilers (const array allocations only)
+    // t_atom buf[x->ll_amount];
+
+    t_atom* buf = (t_atom*)malloc(x->ll_amount * sizeof(t_atom));
     short i;
-    for(i=0;i<x->ll_amount;i++) atom_setlong(&buf[i], array[i]);
+    for (i = 0; i < x->ll_amount; i++)
+    {
+        atom_setlong(&buf[i], array[i]);
+    }
+
     outlet_anything(x->ll_box.b_ob.o_outlet, s, x->ll_amount, buf);
+
+    free(buf);
 }
 void ll_2dslider_spread(t_ll_2dslider *x){
     short i, j = 0;
