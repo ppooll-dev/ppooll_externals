@@ -142,8 +142,6 @@ void ll_fastforward_list(t_ll_fastforward *x, t_symbol *s, long ac, t_atom *av){
         }
         
     }
-
-
     //object_method_long(x->the->s_thing, x->llist, n, NULL);
     //object_method_long(x->the->s_thing, gensym("int"), n, NULL);
     //typedmess(x->the->s_thing,gensym("int"),1,n);
@@ -153,7 +151,6 @@ void ll_fastforward_anything(t_ll_fastforward *x, t_symbol *s, long ac, t_atom *
     if(ac>0){
 		 if(x->prp){
 			 sprintf(x->c,"%s%s",x->prepend->s_name,s->s_name);
-             
          }
          else{
              sprintf(x->c,"%s",s->s_name);
@@ -161,7 +158,6 @@ void ll_fastforward_anything(t_ll_fastforward *x, t_symbol *s, long ac, t_atom *
             x->mess = gensym(x->c);
         //post("messany %s",x->mess->s_name);
 			 if(x->mess->s_thing){
-			 
 				 switch (atom_gettype(av)) {
 					 case A_LONG:
                          //post("any_long");
@@ -177,7 +173,6 @@ void ll_fastforward_anything(t_ll_fastforward *x, t_symbol *s, long ac, t_atom *
                          //post("any_sym");
 						 if(ac==1) typedmess(x->mess->s_thing,atom_getsym(av),0,0L);
 						 else typedmess(x->mess->s_thing,atom_getsym(av),ac-1,av+1);
-						 
 						 break;
 					 default:
 						 post("unknown atom type");
@@ -185,9 +180,6 @@ void ll_fastforward_anything(t_ll_fastforward *x, t_symbol *s, long ac, t_atom *
 				 }
 				 
 			 }
-
-		 
-	
     }
 }
 // +++++++++++++++++++++++++++prepend
