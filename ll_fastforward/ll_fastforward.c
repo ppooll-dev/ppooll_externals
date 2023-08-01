@@ -155,39 +155,47 @@ void ll_fastforward_anything(t_ll_fastforward *x, t_symbol *s, long ac, t_atom *
          else{
              sprintf(x->c,"%s",s->s_name);
          }
-            x->mess = gensym(x->c);
-        //post("messany %s",x->mess->s_name);
-			 if(x->mess->s_thing){
-				 switch (atom_gettype(av)) {
-					 case A_LONG:
-                         //post("any_long");
-						 if(ac==1) typedmess(x->mess->s_thing,gensym("int"),ac,av);
-						 else typedmess(x->mess->s_thing,x->llist,ac,av);
-						 break;
-					 case A_FLOAT:
-                         //post("any_float");
-						 if(ac==1) typedmess(x->mess->s_thing,gensym("float"),ac,av);
-						 else typedmess(x->mess->s_thing,x->llist,ac,av);
-						 break;
-					 case A_SYM:
-                         //post("any_sym");
-						 if(ac==1) typedmess(x->mess->s_thing,atom_getsym(av),0,0L);
-						 else typedmess(x->mess->s_thing,atom_getsym(av),ac-1,av+1);
-						 break;
-					 default:
-						 post("unknown atom type");
-						 break;
-				 }
-				 
-			 }
+       	x->mess = gensym(x->c);
+       	//post("messany %s",x->mess->s_name);
+		if(x->mess->s_thing){
+			switch (atom_gettype(av)) {
+				case A_LONG:
+               		//post("any_long");
+					if(ac==1) typedmess(x->mess->s_thing,gensym("int"),ac,av);
+					else typedmess(x->mess->s_thing,x->llist,ac,av);
+					break;
+				case A_FLOAT:
+               		//post("any_float");
+					if(ac==1) typedmess(x->mess->s_thing,gensym("float"),ac,av);
+					else typedmess(x->mess->s_thing,x->llist,ac,av);
+					break;
+				case A_SYM:
+               		//post("any_sym");
+					if(ac==1) typedmess(x->mess->s_thing,atom_getsym(av),0,0L);
+					else typedmess(x->mess->s_thing,atom_getsym(av),ac-1,av+1);
+					break;
+				default:
+					post("unknown atom type");
+					break;
+			}
+			 
+		}
     }
 }
 // +++++++++++++++++++++++++++prepend
-void ll_fastforward_prepend(t_ll_fastforward *x, t_symbol *s, long ac, t_atom *av){
-    //post("ac %d %s", ac, atom_getsym(av)->s_name);
-    x->prepend = atom_getsym(av);
-    x->prp = 1;
-    
+void ll_fastforward_prepend(t_ll_fastforward *x, t_symbol *s, long ac, t_atom *av) {
+    if (ac > 0 && av != NULL) {
+        // Check the first atom if it is a symbol before using atom_getsym.
+        if (atom_gettype(av) == A_SYM) {
+        	//post("ac %d %s", ac, atom_getsym(av)->s_name);
+            x->prepend = atom_getsym(av);
+            x->prp = 1;
+        } else {
+            // post("Error: The first argument is not a symbol.");
+        }
+    } else {
+        // post("Error: Invalid number of arguments or NULL atom.");
+    }
 }
 
 
