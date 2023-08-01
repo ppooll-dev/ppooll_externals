@@ -71,6 +71,8 @@ typedef struct _ll_mcwaveform
     double      mslist[4];
     double      msold[2];
     double      linepos;
+    double      vzoom;
+
     
     t_object *buffer;
     t_atom *path;
@@ -92,6 +94,7 @@ void ll_mcwaveform_float(t_ll_mcwaveform *x, double f);
 void ll_mcwaveform_list(t_ll_mcwaveform *x, t_symbol *s, short ac, t_atom *av);
 void ll_mcwaveform_mode(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av);
 void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av);
+void ll_mcwaveform_vzoom(t_ll_mcwaveform *x, double f);
 void ll_mcwaveform_line(t_ll_mcwaveform *x, double f);
 void ll_mcwaveform_start(t_ll_mcwaveform *x, double f);
 void ll_mcwaveform_length(t_ll_mcwaveform *x, double f);
@@ -139,6 +142,7 @@ void ext_main(void *r){
     class_addmethod(c, (method)ll_mcwaveform_mode,			"mode",		A_GIMME, 0);
     class_addmethod(c, (method)ll_mcwaveform_chans,			"chans",		A_GIMME, 0);
     class_addmethod(c, (method)ll_mcwaveform_line,          "line", A_FLOAT, 0);
+    class_addmethod(c, (method)ll_mcwaveform_vzoom,          "vzoom", A_FLOAT, 0);
     class_addmethod(c, (method)ll_mcwaveform_start,         "start", A_FLOAT, 0);
     class_addmethod(c, (method)ll_mcwaveform_length,         "length", A_FLOAT, 0);
     class_addmethod(c, (method)ll_mcwaveform_selstart,       "selstart", A_FLOAT, 0);
@@ -256,6 +260,7 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
     x->chans = 0;
     x->chan_offset = 0;
     x->sf_mode = -1;
+    x->vzoom = 1.0;
     //ll_mcwaveform_bang(x);
     
     return x;
@@ -481,6 +486,16 @@ void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
     //post ("chans %d chan_offset %d sfm %d",x->chans,x->chan_offset,x->sf_mode);
     
 }
+void ll_mcwaveform_vzoom(t_ll_mcwaveform *x, double f){
+    double new_zoom = 0.000001;
+    if (f > 0.0) {
+       new_zoom = pow(f, 0.003);
+    } 
+    x->vzoom=new_zoom;
+    x->wf_paint=1;
+    jbox_redraw(&x->ll_box);
+    // ll_mcwaveform_reread(x);
+}
 void ll_mcwaveform_line(t_ll_mcwaveform *x, double f){
     x->linepos=f;
     jbox_redraw(&x->ll_box);
@@ -545,7 +560,7 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
     jgraphics_set_source_jrgba(g, &x->ll_linecolor);
     jgraphics_move_to(g,(x->linepos-x->mslist[0])/x->mslist[1]*rect.width,0);
     jgraphics_line_to(g,(x->linepos-x->mslist[0])/x->mslist[1]*rect.width,rect.height);
-    //post("linepos %f",(x->linepos-x->mslist[0])/x->mslist[1]*rect.width);
+    // post("linepos %f",(x->linepos-x->mslist[0])/x->mslist[1]*rect.width);
     jgraphics_set_line_width(g, 1);
     jgraphics_stroke(g);
 }
@@ -553,6 +568,9 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
     long i,j,k,co,chns;
     short peek_amt;
     float r,ro,maxf,minf,cf;
+    
+    double vzoom_amount = x->vzoom;
+
     t_float		*tab;
     t_buffer_obj	*buffer = buffer_ref_getobject(x->l_buffer_reference);
     jbox_invalidate_layer((t_object *)x, NULL, gensym("wf"));
@@ -563,7 +581,7 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
     //short tm;
     //tm = jkeyboard_getcurrentmodifiers();
     //post("mk %d",tm);
-    
+
     if (g) {
         jgraphics_set_source_jrgba(g, &x->ll_bgcolor);
         jgraphics_rectangle_fill_fast(g, 0 , 0, rect->width, rect->height);
@@ -582,28 +600,27 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
                     object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
                     tab = buffer_locksamples(buffer);
                     for (k=0;k<chns;k++){ //k<x->l_chan
-                    
-                    maxf=0;minf=0;
-                    for (j=0;j<peek_amt;j++){
-                        cf = tab[x->l_chan*j+k+x->chan_offset];
-                        maxf = fmax(cf,maxf);
-                        minf = fmin(cf,minf);
+                        maxf=0;minf=0;
+                        for (j=0;j<peek_amt;j++){
+                            cf = tab[x->l_chan*j+k+x->chan_offset];
+                            maxf = fmax(cf,maxf)/vzoom_amount;
+                            minf = fmin(cf,minf)/vzoom_amount;
+                        }
+                        
+                        if (minf*-1>maxf) maxf = minf;
+                        x->buf_arr[i][k]= maxf;
+                        //jgraphics_move_to(g,i,(co/2+k*co)-x->buf_arr[i][k]*co/2);
+                        //jgraphics_line_to(g,i,(co/2+k*co)+x->buf_arr[i][k]*co/2);
+                        if (peek_amt>200){
+                            jgraphics_move_to(g,i,(co/2+k*co)-maxf*co/2);
+                            jgraphics_line_to(g,i,(co/2+k*co)+maxf*co/2);
+                        }
+                        else {
+                            jgraphics_move_to(g,i,(co/2+k*co));
+                            jgraphics_line_to(g,i,(co/2+k*co)-maxf*co/2);
+                        }
+                        
                     }
-                    
-                    if (minf*-1>maxf) maxf = minf;
-                    x->buf_arr[i][k]= maxf;
-                    //jgraphics_move_to(g,i,(co/2+k*co)-x->buf_arr[i][k]*co/2);
-                    //jgraphics_line_to(g,i,(co/2+k*co)+x->buf_arr[i][k]*co/2);
-                    if (peek_amt>200){
-                        jgraphics_move_to(g,i,(co/2+k*co)-maxf*co/2);
-                        jgraphics_line_to(g,i,(co/2+k*co)+maxf*co/2);
-                    }
-                    else {
-                        jgraphics_move_to(g,i,(co/2+k*co));
-                        jgraphics_line_to(g,i,(co/2+k*co)-maxf*co/2);
-                    }
-                    
-                }
                     buffer_unlocksamples(buffer);
                 }
                 x->sf_read = 0;
@@ -643,8 +660,8 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
                     for (j=0;j<peek_amt;j++){
                         cf = tab[x->l_chan*((int)roundl(i*r+ro)+j)+k+x->chan_offset];
                         //if (cf<0) cf=-cf;
-                        maxf = fmax(cf,maxf);
-                        minf = fmin(cf,minf);
+                        maxf = fmax(cf,maxf)/vzoom_amount;
+                        minf = fmin(cf,minf)/vzoom_amount;
                     }
                     if (minf*-1>maxf) maxf = minf;
                 //x->buf_arr[i][k]= maxf;
