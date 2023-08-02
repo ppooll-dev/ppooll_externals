@@ -581,13 +581,12 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
     //short tm;
     //tm = jkeyboard_getcurrentmodifiers();
     //post("mk %d",tm);
-
     if (g) {
         jgraphics_set_source_jrgba(g, &x->ll_bgcolor);
         jgraphics_rectangle_fill_fast(g, 0 , 0, rect->width, rect->height);
         jgraphics_set_source_jrgba(g, &x->ll_wfcolor);
         co = rect->height/chns;
-        if (x->sf_mode){
+        if (x->sf_mode == 1){
             if (x->sf_read){
                 r = x->mslist[1]/rect->width; //stepsize in ms
                 ro = x->mslist[0];
@@ -650,7 +649,7 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
                 }
             
         }
-        else {
+        else if(buffer){
             tab = buffer_locksamples(buffer);
             r = x->mslist[1]*x->l_srms/rect->width; //stepsize in frames
             ro = x->mslist[0]*x->l_srms;
