@@ -68,20 +68,23 @@ typedef struct _ll_mcwaveform
     double      linepos;
     double      vzoom;
     long        should_reread;
+    long        run_clock;
+
+    double      reread_rate;
 
     t_object *buffer;
     t_atom *path;
     t_atom msg[4], rv;
 
-    void *m_qelem;
-    void *m_clock;
+    t_qelem* m_qelem;
+    t_clock* m_clock;
 
 } t_ll_mcwaveform;
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ basic
 void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv);
 void ll_mcwaveform_assist(t_ll_mcwaveform *x, void *b, long m, long a, char *s);
 void ll_mcwaveform_free(t_ll_mcwaveform *x);
-void ll_mcwaveform_qtask(t_ll_mcwaveform *x);
+void ll_mcwaveform_qtask(t_ll_mcwaveform *x, t_symbol *s, short argc, t_atom *argv);
 void ll_mcwaveform_task(t_ll_mcwaveform *x);
 t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, void *sender, void *data);
 void ll_mcwaveform_iterator(t_ll_mcwaveform *x, t_object *b);
@@ -137,8 +140,6 @@ void ext_main(void *r){
     
     class_addmethod(c, (method)ll_mcwaveform_paint,			"paint",      A_CANT, 0);
     class_addmethod(c, (method)ll_mcwaveform_int,           "int",        A_LONG, 0);
-    class_addmethod(c, (method)ll_mcwaveform_int,           "int",        A_LONG, 0);
-    class_addmethod(c, (method)ll_mcwaveform_notify,        "notify",     A_CANT, 0);
     class_addmethod(c, (method)ll_mcwaveform_float,			"float",      A_FLOAT, 0);
     class_addmethod(c, (method)ll_mcwaveform_list,			"list",       A_GIMME, 0);
     class_addmethod(c, (method)ll_mcwaveform_bang,			"bang",       0);
@@ -153,8 +154,8 @@ void ext_main(void *r){
     class_addmethod(c, (method)ll_mcwaveform_zoom2sel,		"zoom2sel",   0);
     class_addmethod(c, (method)ll_mcwaveform_sel_all,		"sel_all",    0);
     class_addmethod(c, (method)ll_mcwaveform_full,			"full",       0);
-    class_addmethod(c, (method)ll_mcwaveform_reread,	    "reread",     0);
-
+    // class_addmethod(c, (method)ll_mcwaveform_reread,	    "reread",     0);
+    class_addmethod(c, (method)ll_mcwaveform_notify,        "notify",     A_CANT, 0);
 
     class_addmethod(c, (method) ll_mcwaveform_mousemove,	"mousemove",  A_CANT, 0);
     class_addmethod(c, (method)ll_mcwaveform_mousedown,		"mousedown",  A_CANT, 0);
@@ -266,9 +267,15 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
     x->vzoom = 1.0;
 
     x->should_reread = 0;
+    x->run_clock = 0;
+
+    x->reread_rate = 500.;
+    
     //ll_mcwaveform_bang(x);
     x->m_clock = clock_new((t_ll_mcwaveform *)x, (method)ll_mcwaveform_task);
     x->m_qelem = qelem_new((t_ll_mcwaveform *)x, (method)ll_mcwaveform_qtask);
+
+
     return x;
 }
 void ll_mcwaveform_assist(t_ll_mcwaveform *x, void *b, long m, long a, char *s){
@@ -282,32 +289,46 @@ void ll_mcwaveform_assist(t_ll_mcwaveform *x, void *b, long m, long a, char *s){
 void ll_mcwaveform_free(t_ll_mcwaveform *x){
     object_free(x->l_buffer_reference);
     jbox_free(&x->ll_box);
-    object_free(x->m_clock);
+    clock_free(x->m_clock);
     qelem_free(x->m_qelem);
 }
 
-void ll_mcwaveform_qtask(t_ll_mcwaveform *x){
-    if(buffer_ref_exists(x->l_buffer_reference)){
-        jbox_redraw(&x->ll_box);
-    }
+void ll_mcwaveform_qtask(t_ll_mcwaveform *x, t_symbol *s, short argc, t_atom *argv){
+    // post("Tick!");
+    ll_mcwaveform_reread(x);
 }
 
 void ll_mcwaveform_task(t_ll_mcwaveform *x){
-    x->should_reread = 0.;
+    qelem_set(x->m_qelem);
+
+    // Start the initial tick
+    if(x->run_clock){
+        clock_fdelay(x->m_clock, x->reread_rate); // Schedule next tick after the interval
+    }
 }
 
 t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, void *sender, void *data)
 {       
-    if(msg == gensym("globalsymbol_unbinding") || msg == gensym("globalsymbol_binding") || msg == gensym("globalsymbol_binding")){
-        ll_mcwaveform_reread(x);
-    }else if(msg == gensym("buffer_modified")){
-        if(!x->should_reread){
-            x->should_reread = 1;
-            ll_mcwaveform_reread(x);
-            clock_fdelay(x->m_clock, 250.);
+    if(msg == gensym("globalsymbol_unbinding") || msg == gensym("globalsymbol_binding")){
+        if(msg == gensym("globalsymbol_unbinding")){
+            // Buffer removed
+            x->wf_paint = 0;
+            x->sf_read = 0;
+            x->run_clock = 0;
+            x->should_reread = 0;
+            ll_mcwaveform_bang(x);
         }else{
-            // post("delay reread...");
+            // Buffer added
+            ll_mcwaveform_reread(x);
         }
+    }else if(msg == gensym("buffer_modified")){
+        // "should_reread" flag prevents additional click calls from
+        if(!x->should_reread){
+            // Start the clock
+            x->run_clock = 1;
+            clock_fdelay(x->m_clock, x->reread_rate); // Schedule the first tick
+        }
+        x->should_reread = 1;
     }
     // post("notification from %s: %s",s->s_name, msg->s_name);
     return buffer_ref_notify(x->l_buffer_reference, s, msg, sender, data);
@@ -442,7 +463,7 @@ void ll_mcwaveform_bang(t_ll_mcwaveform *x){
     x->mslist[3] = fmin(x->l_length, x->mslist[3]);
 
     if (x->sf_mode > -1) {
-        qelem_set(x->m_qelem);
+        jbox_redraw(&x->ll_box);
     }
 
     t_atom myList[4];
@@ -545,7 +566,6 @@ void ll_mcwaveform_vzoom(t_ll_mcwaveform *x, double f){
        new_zoom = pow(f, 0.003);
     } 
     x->vzoom=new_zoom;
-    x->wf_paint=1;
     // jbox_redraw(&x->ll_box);
     ll_mcwaveform_reread(x);
 }
