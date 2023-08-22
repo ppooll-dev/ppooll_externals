@@ -308,7 +308,8 @@ void ll_mcwaveform_task(t_ll_mcwaveform *x){
 }
 
 t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, void *sender, void *data)
-{       
+{      
+    // post("notification from %s: %s",s->s_name, msg->s_name);
     if(msg == gensym("globalsymbol_unbinding") || msg == gensym("globalsymbol_binding")){
         if(msg == gensym("globalsymbol_unbinding")){
             // Buffer removed
@@ -329,8 +330,9 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
             clock_fdelay(x->m_clock, x->reread_rate); // Schedule the first tick
         }
         x->should_reread = 1;
+    }else if(msg == gensym("attr_changed")){
+        // buffer set?
     }
-    // post("notification from %s: %s",s->s_name, msg->s_name);
     return buffer_ref_notify(x->l_buffer_reference, s, msg, sender, data);
 }
 
