@@ -299,12 +299,8 @@ void ll_mcwaveform_qtask(t_ll_mcwaveform *x, t_symbol *s, short argc, t_atom *ar
 }
 
 void ll_mcwaveform_task(t_ll_mcwaveform *x){
-    qelem_set(x->m_qelem);
-
-    // Start the initial tick
-    if(x->run_clock){
-        clock_fdelay(x->m_clock, x->reread_rate); // Schedule next tick after the interval
-    }
+    
+    x->should_reread = 0;
 }
 
 t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, void *sender, void *data)
@@ -320,19 +316,20 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
             ll_mcwaveform_bang(x);
         }else{
             // Buffer added
-            ll_mcwaveform_reread(x);
+            // ll_mcwaveform_reread(x);
         }
     }else if(msg == gensym("buffer_modified")){
-        // "should_reread" flag prevents additional click calls from
+        // "should_reread" flag -- reread only every x ms (reread_rate)
         if(!x->should_reread){
-            // Start the clock
-            x->run_clock = 1;
+            x->should_reread = 1;
+            // qelem_set(x->m_qelem); //  <-- perform in 
+            ll_mcwaveform_reread(x);
             clock_fdelay(x->m_clock, x->reread_rate); // Schedule the first tick
         }
-        x->should_reread = 1;
     }else if(msg == gensym("attr_changed")){
         // buffer set?
     }
+
     return buffer_ref_notify(x->l_buffer_reference, s, msg, sender, data);
 }
 
