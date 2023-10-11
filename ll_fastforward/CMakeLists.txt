@@ -1,8 +1,7 @@
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../max-sdk-base/script/max-pretarget.cmake)
+project(ll_fastforward)
 
-#############################################################
-# MAX EXTERNAL
-#############################################################
+# Set a default value for MAX_SDK_BASE_PATH and allow it to be overridden by the user
+include(${MAX_SDK_BASE_PATH}/script/max-pretarget.cmake)
 
 include_directories( 
 	"${MAX_SDK_INCLUDES}"
@@ -22,6 +21,13 @@ add_library(
 	${MAX_SDK_INCLUDES}/common/commonsyms.c
 )
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/../../max-sdk-base/script/max-posttarget.cmake)
+# Set the output directories for this target to the top-level bin directory
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+    BUNDLE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+include(${MAX_SDK_BASE_PATH}/script/max-posttarget.cmake)
 
 set(CMAKE_OSX_ARCHITECTURES x86_64;arm64)
