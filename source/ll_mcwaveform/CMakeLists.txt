@@ -1,6 +1,5 @@
 project(ll_mcwaveform)
 
-# Set a default value for MAX_SDK_BASE_PATH and allow it to be overridden by the user
 include(${MAX_SDK_BASE_PATH}/script/max-pretarget.cmake)
 
 include_directories( 
