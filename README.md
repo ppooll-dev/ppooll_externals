@@ -20,7 +20,8 @@ Build for OSX:
 4. `make`
 
 Build for Windows:
-1. `mkdir build-win`
-2. `cd build-win`
-3. `cmake .. -DMAX_SDK_BASE_PATH=/path/to/max-sdk-base -DCMAKE_TOOLCHAIN_FILE=WindowsToolchain.cmake` 
-4. `make`
+1. `brew install mingw-w64`
+2. `mkdir build-win`
+3. `cd build-win`
+4. `cmake .. -DMAX_SDK_BASE_PATH=/path/to/max-sdk-base -DCMAKE_TOOLCHAIN_FILE=WindowsToolchain.cmake` 
+5. `make`
