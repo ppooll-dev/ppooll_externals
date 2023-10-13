@@ -1,5 +1,7 @@
 project(ll_number)
 
+set(CMAKE_OSX_ARCHITECTURES x86_64;arm64)
+
 include(${MAX_SDK_BASE_PATH}/script/max-pretarget.cmake)
 
 include_directories( 
@@ -21,5 +23,3 @@ add_library(
 )
 
 include(${MAX_SDK_BASE_PATH}/script/max-posttarget.cmake)
-
-set(CMAKE_OSX_ARCHITECTURES x86_64;arm64)
