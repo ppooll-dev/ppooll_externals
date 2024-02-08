@@ -453,6 +453,66 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
 		ll_mcwaveform_bang(x);
 	}
 } 
+
+
+/*
+	sf
+		sfplay mode -- load a filepath with required buffer info as additional args:
+			# of channels, samplerate, length
+*/
+void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
+	long i;
+	t_atom *ap;
+	x->sf_mode = 1;
+	for (i = 0, ap = av; i < ac; i++, ap++){
+		switch (atom_gettype(ap)) {
+			case A_LONG:
+				if (i==1) 
+					x->l_chan = atom_getlong(ap);
+				if (i==2) 
+					x->l_srms = atom_getlong(ap) * 0.001;
+				break;
+			case A_FLOAT:
+				if (i==3) 
+					x->l_length = atom_getfloat(ap);
+				break;
+			case A_SYM:
+				if (i==0) 
+					x->path = ap;
+				break;
+			default:
+				break;
+		}
+	} 
+	//process arguments
+	//post("path %s ch %d srms %f len %f",atom_getsym(x->path)->s_name,x->l_chan,x->l_srms,x->l_length);
+	x->ms_list.start=0;
+	x->ms_list.length=x->l_length;
+
+	t_object *patcher;
+	t_max_err err;
+	err = object_obex_lookup(x, gensym("#P"), &patcher);
+	ll_mcwaveform_iterator(x, patcher); //get buffer object
+	if (x->buf_found) {
+		atom_setlong(x->msg, 600);
+		object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
+		x->msg[0]=*x->path;
+		atom_setlong(x->msg + 1, 0);
+		atom_setlong(x->msg + 2, 600);
+		atom_setlong(x->msg + 3, x->l_chan);
+		object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
+		
+		if (!x->l_buffer_reference){
+			x->l_buffer_reference = buffer_ref_new((t_object *)x, x->bufname);
+		}else{
+			buffer_ref_set(x->l_buffer_reference, x->bufname);
+		}
+		x->sf_read = 1;
+		x->wf_paint = 1;
+		ll_mcwaveform_bang(x);
+	}
+}
+
 /*
 	iterator
 		Find or create the buffer object to display in file/sf mode.
@@ -494,64 +554,6 @@ void ll_mcwaveform_iterator(t_ll_mcwaveform *x, t_object *b) {
     t_atom msg;
     atom_setsym(&msg, bufname);
     object_method_typed(x->buffer, gensym("name"), 1, &msg, NULL);
-}
-
-/*
-	sf
-		sfplay mode -- load a filepath with required buffer info as additional args:
-			# of channels, samplerate, length
-*/
-void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
-	long i;
-	t_atom *ap;
-	x->sf_mode = 1;
-	for (i = 0, ap = av; i < ac; i++, ap++){
-		switch (atom_gettype(ap)) {
-			case A_LONG:
-				if (i==1) 
-					x->l_chan=atom_getlong(ap);
-				if (i==2) 
-					x->l_srms=atom_getlong(ap)*0.001;
-				break;
-			case A_FLOAT:
-				if (i==3) 
-					x->l_length=atom_getfloat(ap);
-				break;
-			case A_SYM:
-				if (i==0) 
-					x->path = ap;
-				break;
-			default:
-				break;
-		}
-	} 
-	//process arguments
-	//post("path %s ch %d srms %f len %f",atom_getsym(x->path)->s_name,x->l_chan,x->l_srms,x->l_length);
-	x->ms_list.start=0;
-	x->ms_list.length=x->l_length;
-
-	t_object *patcher;
-	t_max_err err;
-	err = object_obex_lookup(x, gensym("#P"), &patcher);
-	ll_mcwaveform_iterator(x, patcher); //get buffer object
-	if (x->buf_found) {
-		atom_setlong(x->msg, 600);
-		object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
-		x->msg[0]=*x->path;
-		atom_setlong(x->msg + 1, 0);
-		atom_setlong(x->msg + 2, 600);
-		atom_setlong(x->msg + 3, x->l_chan);
-		object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
-		
-		if (!x->l_buffer_reference){
-			x->l_buffer_reference = buffer_ref_new((t_object *)x, x->bufname);
-		}else{
-			buffer_ref_set(x->l_buffer_reference, x->bufname);
-		}
-		x->sf_read = 1;
-		x->wf_paint = 1;
-		ll_mcwaveform_bang(x);
-	}
 }
 
 
@@ -874,8 +876,8 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
 	jbox_paint_layer((t_object *)x, view, gensym("wf"), 0., 0.);
 	jgraphics_set_source_jrgba(g, &x->ll_selcolor);
 
-	double select_start = ((x->ms_list.sel_start - x->ms_list.start) / x->ms_list.length) * rect.width;
-	double select_end = ((x->ms_list.sel_end - x->ms_list.start) / x->ms_list.length) * rect.width;
+	double select_start = (x->ms_list.sel_start - x->ms_list.start) / x->ms_list.length * rect.width;
+	double select_end = (x->ms_list.sel_end - x->ms_list.sel_start) / x->ms_list.length * rect.width;
 
 	if (x->inv_sel_color) {
 		jgraphics_rectangle_fill_fast(g, 0, 0, select_start, rect.height);
@@ -884,6 +886,15 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
 	else{
 		jgraphics_rectangle_fill_fast(g, select_start, 0, select_end, rect.height);
 	}
+
+	// if (x->inv_sel_color) {
+	// 	jgraphics_rectangle_fill_fast(g,0, 0 ,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
+	// 	jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,rect.width-(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
+	// }
+	// else{
+	// 	jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,(x->ms_list.sel_end-x->ms_list.sel_start)/x->ms_list.length*rect.width, rect.height);
+	// }
+
 	if(x->linepos >= 0){
 		double line_position = (x->linepos - x->ms_list.start) / x->ms_list.length * rect.width;
 		jgraphics_set_source_jrgba(g, &x->ll_linecolor);
@@ -1098,12 +1109,26 @@ void ll_mcwaveform_mousedown(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
                 x->ms_list.sel_end = cx;
             } else {
                 // Adjust selection based on proximity to start or end.
-                if (fabs(cx - x->ms_list.sel_start) < fabs(cx - x->ms_list.sel_end))
+                if (fabs(cx - x->ms_list.sel_start) < fabs(cx - x->ms_list.sel_end)){
                     s_ll_ccum.x = (x->ms_list.sel_end - x->ms_list.start) / x->ms_list.length * rect.width;
-                else 
+                }else {
                     s_ll_ccum.x = (x->ms_list.sel_start - x->ms_list.start) / x->ms_list.length * rect.width;
+                }
+                if(cx < x->ms_list.sel_start)
+                	x->ms_list.sel_start = cx;
+               	else
+               		x->ms_list.sel_end = cx;
             }
             break;
+        }
+        case MOUSE_MODE_LOOP: {
+        	double cx = pt.x * x->ms_list.length / rect.width + x->ms_list.start;
+
+        	double selected_len = x->ms_list.sel_end - x->ms_list.sel_start;
+        	double selected_half = selected_len / 2;
+
+        	x->ms_list.sel_start = cx - selected_half;
+        	x->ms_list.sel_end = cx + selected_half;
         }
         default:
             // Handle other modes, if necessary, or do nothing.
@@ -1119,6 +1144,10 @@ void ll_mcwaveform_mouseup(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, l
 	x->mouse_down = 0;
 	if (x->sf_mode && (x->mouse_mode == MOUSE_MODE_MOVE))
 		ll_mcwaveform_reread(x);
+
+	if(x->mouse_mode == MOUSE_MODE_LOOP || x->mouse_mode == MOUSE_MODE_SELECT){
+		ll_mcwaveform_bang(x);
+	}
 }
 
 /*
@@ -1137,7 +1166,6 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
 	double scaleFactor = x->ms_list.length / rect.width;
 	double newXPosition = pt.x * scaleFactor + x->ms_list.start;
 	double deltaYXScale = (2 * s_ll_delta.y + s_ll_delta.x) * scaleFactor;
-
 	switch (x->mouse_mode) {
 		case MOUSE_MODE_SELECT: {
 			// Calculate the start and end points based on the current and previous cursor positions
