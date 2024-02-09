@@ -55,6 +55,8 @@ typedef struct _ll_mcwaveform
 
 	char        mouse_mode;
 	short       mouse_down;
+	short       mouse_over;
+
 
 	short       sf_mode;
 	short       sf_read;
@@ -127,12 +129,15 @@ void ll_mcwaveform_selend(t_ll_mcwaveform *x, double f);
 void ll_mcwaveform_full(t_ll_mcwaveform *x);
 void ll_mcwaveform_zoom2sel(t_ll_mcwaveform *x);
 void ll_mcwaveform_sel_all(t_ll_mcwaveform *x);
+void ll_mcwaveform_sel_disp(t_ll_mcwaveform *x);
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ paint
 void ll_mcwaveform_reread(t_ll_mcwaveform *x);
 void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view);
 void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect);
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ mouse &key
+void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
 void ll_mcwaveform_mouseenter(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
+void ll_mcwaveform_mouseleave(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
 void ll_mcwaveform_mousedown(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
 void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
 void ll_mcwaveform_mouseup(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
@@ -173,6 +178,7 @@ void ext_main(void *r){
 	class_addmethod(c, (method)ll_mcwaveform_selend,        "selend",     A_FLOAT, 0);
 	class_addmethod(c, (method)ll_mcwaveform_zoom2sel,		"zoom2sel",   0);
 	class_addmethod(c, (method)ll_mcwaveform_sel_all,		"sel_all",    0);
+	class_addmethod(c, (method)ll_mcwaveform_sel_disp,		"sel_disp",    0);
 	class_addmethod(c, (method)ll_mcwaveform_full,			"full",       0);
 	class_addmethod(c, (method)ll_mcwaveform_reread,	    "reread",     0);
 	class_addmethod(c, (method)ll_mcwaveform_notify,        "notify",     A_CANT, 0);
@@ -636,7 +642,7 @@ void ll_mcwaveform_list(t_ll_mcwaveform *x, t_symbol *s, short ac, t_atom *av){
 /**************************************************************************************************
 	
 	Object-Specific Messages
-		(mode, chans, vzoom, line, start, length, selstart, selend, zoom2sel, sel_all, full)
+		(mode, chans, vzoom, line, start, length, selstart, selend, zoom2sel, sel_all, sel_disp, full)
 
 *************************************************************************************************/
 
@@ -823,15 +829,25 @@ void ll_mcwaveform_zoom2sel(t_ll_mcwaveform *x){
 }
 
 /*
-	sel_all [Max Message]
+	sel_disp [Max Message]
 		Select the displayed portion of the waveform.
-
-		TO-DO: this name is misleading it makes me think we are trying to select the entire waveform.
-		We should keep this as "sel_displayed", and make a proper "sel_all" method.
 */
-void ll_mcwaveform_sel_all(t_ll_mcwaveform *x){
+void ll_mcwaveform_sel_disp(t_ll_mcwaveform *x){
 	x->ms_list.sel_start = x->ms_list.start;
 	x->ms_list.sel_end = x->ms_list.start + x->ms_list.length;
+	ll_mcwaveform_bang(x);
+}
+
+/*
+	sel_all [Max Message]
+		Select the entire waveform.
+*/
+void ll_mcwaveform_sel_all(t_ll_mcwaveform *x){
+	x->ms_list.start = 0;
+	x->ms_list.length = x->l_length;
+
+	x->ms_list.sel_start = 0;
+	x->ms_list.sel_end = x->l_length;
 	ll_mcwaveform_bang(x);
 }
 
@@ -1042,12 +1058,48 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
 
 *************************************************************************************************/
 
+void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
+	t_rect rect;
+	jbox_get_rect_for_view((t_object *)x, patcherview, &rect);
+	t_jmouse_cursortype cursorType = JMOUSE_CURSOR_ARROW; // Default cursor type
+	if(x->mouse_over){
+		switch (x->mouse_mode) {
+			case MOUSE_MODE_MOVE:
+				cursorType = JMOUSE_CURSOR_DRAGGINGHAND;
+				break;
+			case MOUSE_MODE_SELECT:
+				cursorType = JMOUSE_CURSOR_IBEAM;
+				break;
+			case MOUSE_MODE_LOOP:
+				cursorType = JMOUSE_CURSOR_RESIZE_FOURWAY;
+				break;
+			case MOUSE_MODE_DRAW:
+				cursorType = JMOUSE_CURSOR_CROSSHAIR;
+				break;
+		}
+	}
+	// Set the cursor once at the end of the function
+	jmouse_setcursor(patcherview, (t_object *)x, cursorType);
+}
+
 /*
 	mouseenter
 		When the cursor enters the object's viewbox, change the mouse cursor appearance.
 */
 void ll_mcwaveform_mouseenter(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
-	ll_mcwaveform_mousemove(x, patcherview, pt, modifiers);
+	// ll_mcwaveform_mousemove(x, patcherview, pt, modifiers);
+	x->mouse_over = 1;
+	ll_mcwaveform_setmousecursor(x,patcherview,pt,modifiers);
+}
+
+/*
+	mouseenter
+		When the cursor enters the object's viewbox, change the mouse cursor appearance.
+*/
+void ll_mcwaveform_mouseleave(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
+	// ll_mcwaveform_mousemove(x, patcherview, pt, modifiers);
+	x->mouse_over = 0;
+	ll_mcwaveform_setmousecursor(x,patcherview,pt,modifiers);
 }
 
 /*
@@ -1055,25 +1107,7 @@ void ll_mcwaveform_mouseenter(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt
 		When the cursor is hovering over the object, change the mouse cursor appearance.
 */
 void ll_mcwaveform_mousemove(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers) {
-	t_rect rect;
-	jbox_get_rect_for_view((t_object *)x, patcherview, &rect);
-	t_jmouse_cursortype cursorType = JMOUSE_CURSOR_ARROW; // Default cursor type
-	switch (x->mouse_mode) {
-		case MOUSE_MODE_MOVE:
-			cursorType = JMOUSE_CURSOR_DRAGGINGHAND;
-			break;
-		case MOUSE_MODE_SELECT:
-			cursorType = JMOUSE_CURSOR_IBEAM;
-			break;
-		case MOUSE_MODE_LOOP:
-			cursorType = JMOUSE_CURSOR_RESIZE_FOURWAY;
-			break;
-		case MOUSE_MODE_DRAW:
-			cursorType = JMOUSE_CURSOR_CROSSHAIR;
-			break;
-	}
-	// Set the cursor once at the end of the function
-	jmouse_setcursor(patcherview, (t_object *)x, cursorType);
+	ll_mcwaveform_setmousecursor(x,patcherview,pt,modifiers);
 }
 
 /*
