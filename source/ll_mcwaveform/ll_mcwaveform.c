@@ -309,7 +309,7 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
 	t_symbol *unique_id = symbol_unique();
 	t_atom buf_msg[1];
 	atom_setsym(buf_msg, unique_id);
-	t_object *newBuf = newinstance(gensym("buffer~"),1,buf_msg);
+    t_object *newBuf = object_new_typed(CLASS_BOX, gensym("buffer~"),1,buf_msg);
     x->buffer = jbox_get_object(newBuf);
 
 	if(!x->buffer){
