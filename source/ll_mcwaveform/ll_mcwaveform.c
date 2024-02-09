@@ -53,13 +53,13 @@ typedef struct _ll_mcwaveform
 	char        ll_mouseover;
 	char        inv_sel_color;
 
-	char        mouse_mode;
-	short       mouse_down;
-	short       mouse_over;
+	char        mouse_mode; // none, select, loop, move, draw(?)
+	short       mouse_down; // bool
+	short       mouse_over; // bool
 
-
-	short       sf_mode;
+	short       sf_mode; // 
 	short       sf_read;
+
 	short       wf_paint;
 
 	long        ll_rectsize;
@@ -108,7 +108,7 @@ void ll_mcwaveform_free(t_ll_mcwaveform *x);
 void ll_mcwaveform_qtask(t_ll_mcwaveform *x, t_symbol *s, short argc, t_atom *argv);
 void ll_mcwaveform_task(t_ll_mcwaveform *x);
 t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, void *sender, void *data);
-void ll_mcwaveform_iterator(t_ll_mcwaveform *x, t_object *b);
+// void ll_mcwaveform_iterator(t_ll_mcwaveform *x, t_object *b);
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ buffer
 void ll_mcwaveform_set(t_ll_mcwaveform *x, t_symbol *s);
 void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s);
@@ -305,6 +305,21 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
 	x->should_reread = 0;
 	x->run_clock = 0;
 	x->reread_rate = 500.;
+
+	// create placeholder buffer for soundfile
+	t_symbol *unique_id = symbol_unique();
+	t_atom buf_msg[1];
+	atom_setsym(buf_msg, unique_id);
+	t_object *newBuf = newinstance(gensym("buffer~"),1,buf_msg);
+    x->buffer = jbox_get_object(newBuf);
+
+	if(!x->buffer){
+		post("no buffer :(");
+	}else{
+		// post("buffer created -- id: %s", unique_id->s_name);
+	}
+
+	x->bufname = unique_id;
 	
 	x->m_clock = clock_new((t_ll_mcwaveform *)x, (method)ll_mcwaveform_task);
 	x->m_qelem = qelem_new((t_ll_mcwaveform *)x, (method)ll_mcwaveform_qtask);
@@ -320,6 +335,8 @@ void ll_mcwaveform_assist(t_ll_mcwaveform *x, void *b, long m, long a, char *s){
 
 void ll_mcwaveform_free(t_ll_mcwaveform *x){
 	object_free(x->l_buffer_reference);
+	object_free(x->buffer);
+
 	jbox_free(&x->ll_box);
 	clock_free(x->m_clock);
 	qelem_free(x->m_qelem);
@@ -403,13 +420,11 @@ void ll_mcwaveform_set(t_ll_mcwaveform *x, t_symbol *s){
 		buffer_ref_set(x->l_buffer_reference, s);
 	
 	t_buffer_obj *buffer = buffer_ref_getobject(x->l_buffer_reference);
-	tab = buffer_locksamples(buffer);
 	x->l_chan = buffer_getchannelcount(buffer);
 	x->l_frames = buffer_getframecount(buffer);
 	x->l_srms = buffer_getmillisamplerate(buffer);
-	buffer_unlocksamples(buffer);
-
 	x->l_length = x->l_frames / x->l_srms;
+
 	x->ms_list.start = 0;
 	x->ms_list.length = x->l_length;
 	x->wf_paint = 1;
@@ -425,39 +440,46 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
 	t_float	*tab;
 	x->sf_mode = 1;
 
-	t_object *patcher;
-	t_max_err err;
-	err = object_obex_lookup(x, gensym("#P"), &patcher);
-	ll_mcwaveform_iterator(x, patcher); //get buffer object
-	if (x->buf_found) {
-		atom_setsym(x->msg, s);        // filename
-		atom_setlong(x->msg + 1, 0);   // start
-		atom_setlong(x->msg + 2, -1);  // length (-1 for length of file)
-		atom_setlong(x->msg + 3, -1);   // channels (-1 for all channels)
-		object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
-		
-		if (!x->l_buffer_reference){
-			x->l_buffer_reference = buffer_ref_new((t_object *)x, x->bufname);
-		}else{
-			buffer_ref_set(x->l_buffer_reference, x->bufname);
-		}
-
-		t_buffer_obj *buffer = buffer_ref_getobject(x->l_buffer_reference);
-		tab = buffer_locksamples(buffer);
-		x->l_chan = buffer_getchannelcount(buffer);
-		x->l_frames = buffer_getframecount(buffer);
-		x->l_srms = buffer_getmillisamplerate(buffer);
-		buffer_unlocksamples(buffer);
-
-		x->l_length = x->l_frames / x->l_srms;
-
-		x->ms_list.start = 0;
-		x->ms_list.length = x->l_length;
-
-		x->sf_read = 1;
-		x->wf_paint = 1;
-		ll_mcwaveform_bang(x);
+	// First "read" into buffer~
+	//		get sfinfo like samplerate, length, # samples, channels
+	atom_setsym(x->msg, s);        // filename
+	atom_setlong(x->msg + 1, 0);   // start
+	atom_setlong(x->msg + 2, -1);  // length (-1 for length of file)
+	atom_setlong(x->msg + 3, -1);   // channels (-1 for all channels)
+	object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
+	
+	// Set reference to buffer -- is this already done?
+	if (!x->l_buffer_reference){
+		x->l_buffer_reference = buffer_ref_new((t_object *)x, x->bufname);
+	}else{
+		buffer_ref_set(x->l_buffer_reference, x->bufname);
 	}
+
+	// Get the sound file info (sfinfo)
+	t_buffer_obj *buffer = buffer_ref_getobject(x->l_buffer_reference);
+	x->l_chan = buffer_getchannelcount(buffer);
+	x->l_frames = buffer_getframecount(buffer);
+	x->l_srms = buffer_getmillisamplerate(buffer);
+	x->l_length = x->l_frames / x->l_srms;
+
+	x->ms_list.start = 0;
+	x->ms_list.length = x->l_length;
+
+	// Second "read" into buffer~
+	//		only read for 600ms for sf_mode
+	//		read in chunks in paint_wf
+	atom_setlong(x->msg, 600);
+	object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
+	atom_setsym(x->msg, s);        // filename
+	atom_setlong(x->msg + 1, 0);
+	atom_setlong(x->msg + 2, 600);
+	atom_setlong(x->msg + 3, x->l_chan);
+	object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
+	
+	x->sf_read = 1;
+	x->wf_paint = 1;
+	// ll_mcwaveform_bang(x);
+	ll_mcwaveform_bang(x);
 } 
 
 
@@ -495,71 +517,22 @@ void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
 	x->ms_list.start=0;
 	x->ms_list.length=x->l_length;
 
-	t_object *patcher;
-	t_max_err err;
-	err = object_obex_lookup(x, gensym("#P"), &patcher);
-	ll_mcwaveform_iterator(x, patcher); //get buffer object
-	if (x->buf_found) {
-		atom_setlong(x->msg, 600);
-		object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
-		x->msg[0]=*x->path;
-		atom_setlong(x->msg + 1, 0);
-		atom_setlong(x->msg + 2, 600);
-		atom_setlong(x->msg + 3, x->l_chan);
-		object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
-		
-		if (!x->l_buffer_reference){
-			x->l_buffer_reference = buffer_ref_new((t_object *)x, x->bufname);
-		}else{
-			buffer_ref_set(x->l_buffer_reference, x->bufname);
-		}
-		x->sf_read = 1;
-		x->wf_paint = 1;
-		ll_mcwaveform_bang(x);
+	atom_setlong(x->msg, 600);
+	object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
+	x->msg[0]= *x->path;
+	atom_setlong(x->msg + 1, 0);
+	atom_setlong(x->msg + 2, 600);
+	atom_setlong(x->msg + 3, x->l_chan);
+	object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
+	
+	if (!x->l_buffer_reference){
+		x->l_buffer_reference = buffer_ref_new((t_object *)x, x->bufname);
+	}else{
+		buffer_ref_set(x->l_buffer_reference, x->bufname);
 	}
-}
-
-/*
-	iterator
-		Find or create the buffer object to display in file/sf mode.
-*/
-void ll_mcwaveform_iterator(t_ll_mcwaveform *x, t_object *b) {
-    t_object *box;
-    x->buf_found = 0;
-    t_rect rect = {0}; // Initialize rect to ensure it has valid values even if not set.
-
-    // Iterate over objects in the patcher to find a "buffer~" object with varname "mcwfbuf".
-    for (box = jpatcher_get_firstobject(b); box && !x->buf_found; box = jbox_get_nextobject(box)) {
-        t_object *obj = jbox_get_object(box);
-        if (obj && strcmp(object_classname(obj)->s_name, "buffer~") == 0) {
-            t_symbol *name = object_attr_getsym(box, gensym("varname"));
-            if (name == gensym("mcwfbuf")) {
-                x->buffer = obj;
-                x->buf_found = 1;
-            }
-        } else if (obj && strcmp(object_classname(obj)->s_name, "ll_mcwaveform") == 0) {
-            // Capture the rect of the waveform box if needed.
-            object_attr_get_rect(box, gensym("patching_rect"), &rect);
-        }
-    }
-
-    // If buffer~ wasn't found, create it at the position of the last ll_mcwaveform object encountered.
-    if (!x->buf_found) {
-        t_object *newBuf = newobject_sprintf(b, "@maxclass newobj @text \"buffer~ mcwfbuf\" @varname mcwfbuf @patching_position %.2f %.2f", rect.x, rect.y);
-        x->buffer = jbox_get_object(newBuf);
-        x->buf_found = 1;
-    }
-
-    // Assign a unique name to the buffer.
-    char str[20];
-    sprintf(str, "mcwfbuf%d", rand() % 100000);
-    t_symbol *bufname = gensym(str);
-    x->bufname = bufname;
-
-    // Update the buffer~ object's name.
-    t_atom msg;
-    atom_setsym(&msg, bufname);
-    object_method_typed(x->buffer, gensym("name"), 1, &msg, NULL);
+	x->sf_read = 1;
+	x->wf_paint = 1;
+	ll_mcwaveform_bang(x);
 }
 
 
