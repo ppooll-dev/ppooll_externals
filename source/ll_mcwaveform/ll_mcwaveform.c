@@ -108,7 +108,6 @@ void ll_mcwaveform_free(t_ll_mcwaveform *x);
 void ll_mcwaveform_qtask(t_ll_mcwaveform *x, t_symbol *s, short argc, t_atom *argv);
 void ll_mcwaveform_task(t_ll_mcwaveform *x);
 t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, void *sender, void *data);
-// void ll_mcwaveform_iterator(t_ll_mcwaveform *x, t_object *b);
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ buffer
 void ll_mcwaveform_set(t_ll_mcwaveform *x, t_symbol *s);
 void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s);
