@@ -423,7 +423,7 @@ long ll_mcwaveform_acceptsdrag_unlocked(t_ll_mcwaveform *x, t_object *drag, t_ob
 };
 
 long ll_mcwaveform_acceptsdrag_locked(t_ll_mcwaveform *x, t_object *drag, t_object *view){
-    ll_mcwaveform_acceptsdrag_unlocked(x, drag, view);
+    return ll_mcwaveform_acceptsdrag_unlocked(x, drag, view);
 };
 
 /*
