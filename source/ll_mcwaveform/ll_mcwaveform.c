@@ -70,7 +70,7 @@ typedef struct _ll_mcwaveform
 
     short       wf_paint;   // bool, should repaint the waveform
 
-    t_buffer_ref *l_buffer_reference;
+    t_buffer_ref *l_buffer_reference; 
     t_symbol     *bufname;
     short        buf_found;
 
@@ -298,13 +298,13 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
     x->ll_width = rect.width - x->ll_rectsize;
     x->ll_height = rect.height - x->ll_rectsize;
 
-    x->ms_list.start=0.;
-    x->ms_list.length=0.;
-    x->ms_list.sel_start=0.;
-    x->ms_list.sel_end=0.;
+    x->ms_list.start = 0.;
+    x->ms_list.length = 0.;
+    x->ms_list.sel_start = 0.;
+    x->ms_list.sel_end = 0.;
 
-    x->msold[0]=-1;
-    x->msold[1]=-1;
+    x->msold[0] = -1;
+    x->msold[1] = -1;
 
     x->chans = 0;
     x->chan_offset = 0;
@@ -323,7 +323,7 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
     t_symbol *unique_id = symbol_unique();
     t_atom buf_msg[1];
     atom_setsym(buf_msg, unique_id);
-    t_object *newBuf = object_new_typed(CLASS_BOX, gensym("buffer~"),1,buf_msg);
+    t_object *newBuf = object_new_typed(CLASS_BOX, gensym("buffer~"), 1, buf_msg);
     x->buffer = jbox_get_object(newBuf);
 
     if(!x->buffer){
@@ -367,7 +367,6 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
         if(msg == gensym("globalsymbol_unbinding")){
             // Buffer removed
             // post("buffer removed?");
-
             x->wf_paint = 1;
             x->sf_read = 0;
             x->run_clock = 0;
@@ -390,6 +389,7 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
             ll_mcwaveform_bang(x);
         }else{
             // Buffer added
+            // post("buffer added?");
             ll_mcwaveform_reread(x);
         }
     }else if(msg == gensym("buffer_modified")){
@@ -400,7 +400,7 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
             qelem_set(x->m_qelem);
             clock_fdelay(x->m_clock, x->reread_rate); // Schedule the first tick
         }
-        // post("shoudl reread?");
+        // post("buffer modified?");
     // }else if(msg == gensym("attr_changed")){
     //  // buffer set?
     }
@@ -408,13 +408,19 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
 }
 
 
-
 /**************************************************************************************************
     
     Buffer & File Methods
-        (drag&drop, read, file, set, sf, iterator)
+        (drag&drop, read, doread, set, file, sf)
 
 *************************************************************************************************/
+
+/*
+    acceptsdrag_unlocked
+        Called when user drags file over object (unlocked).
+        If audio file match, attempt to read into buffer.
+        TO-DO: replace buffer if buffer_mode?
+*/
 long ll_mcwaveform_acceptsdrag_unlocked(t_ll_mcwaveform *x, t_object *drag, t_object *view){
     if (jdrag_matchdragrole(drag, gensym("audiofile"), 0)) {
         jdrag_box_add(drag, (t_object *)x, gensym("read"));
@@ -423,6 +429,11 @@ long ll_mcwaveform_acceptsdrag_unlocked(t_ll_mcwaveform *x, t_object *drag, t_ob
     return false;
 };
 
+/*
+    acceptsdrag_locked
+        Called when user drags file over object (locked).
+        Call acceptsdrag_unlocked -- same functionality.
+*/
 long ll_mcwaveform_acceptsdrag_locked(t_ll_mcwaveform *x, t_object *drag, t_object *view){
     return ll_mcwaveform_acceptsdrag_unlocked(x, drag, view);
 };
@@ -458,7 +469,7 @@ void ll_mcwaveform_doread(t_ll_mcwaveform *x, t_symbol *s){
     }
 
     // If no filename/path argument, select file with Open Dialog
-    if (open_dialog(filename, &path, &typechosen, &audiotypes, &naudiotypes))       // non-zero: user cancelled
+    if (open_dialog(filename, &path, &typechosen, &audiotypes, &naudiotypes)) // non-zero: user cancelled
         return;
 
     // Convert Path ID and filename to a fully qualified pathname
@@ -513,14 +524,12 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
         object_error((t_object *)x, "Error resolving absolute path: \n%s",s->s_name);
         return; // Make sure to exit if there's an error
     }
-
     // Convert the Max path to a native system path in absolute form
     char filePath[MAX_PATH_CHARS]; // This will hold the POSIX path
     if (path_nameconform(full_path->s_name, filePath, PATH_STYLE_MAX, PATH_TYPE_BOOT) != MAX_ERR_NONE) {
         object_error((t_object *)x, "Error converting path to POSIX format: \n%s",full_path->s_name);
         return;
     }
-
     // Initialize the decoder to read the file's properties
     ma_decoder decoder;
     ma_result result;
@@ -529,7 +538,6 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
         object_error((t_object *)x, "Failed to initialize decoder for file '%s'.", filePath);
         return; // Adjust return type or handling based on your function's design
     }
-
     ma_uint64 totalFrames = 0; // Declare a variable to hold the total frames
     ma_result frameResult;
 
@@ -587,11 +595,10 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
 	ll_mcwaveform_bang(x);
 } 
 
-
 /*
     sf
         sfplay mode -- load a filepath with required buffer info as additional args:
-            # of channels, samplerate, length
+            [ path, channels, samplerate, length ]
 */
 void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
     long i;
@@ -602,25 +609,20 @@ void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
     for (i = 0, ap = av; i < ac; i++, ap++){
         switch (atom_gettype(ap)) {
             case A_LONG:
-                if (i==1) 
-                    x->l_chan = atom_getlong(ap); // # chanels (ms)
-                if (i==2) 
-                    x->l_srms = atom_getlong(ap) * 0.001; // samplerate (ms)
+                if (i==1) x->l_chan = atom_getlong(ap);         // # chanels (ms)
+                if (i==2) x->l_srms = atom_getlong(ap) * 0.001; // samplerate (ms)
                 break;
             case A_FLOAT:
-                if (i==3) 
-                    x->l_length = atom_getfloat(ap); // length (ms)
+                if (i==3) x->l_length = atom_getfloat(ap);      // length (ms)
                 break;
             case A_SYM:
-                if (i==0) 
-                    x->path = ap; // filename/path
+                if (i==0) x->path = ap;                         // filename/path
                 break;
             default:
                 break;
         }
     } 
     //process arguments
-
     x->ms_list.start=0;
     x->ms_list.length=x->l_length;
 
@@ -645,7 +647,7 @@ void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
 
 /**************************************************************************************************
     
-    Max-Specific Input Types
+    Max Non-Message Inputs
         (bang, int, float, list)
 
 *************************************************************************************************/
@@ -669,10 +671,9 @@ void ll_mcwaveform_bang(t_ll_mcwaveform *x){
     x->ms_list.sel_start = fmax(0, x->ms_list.sel_start);
     x->ms_list.sel_end = fmin(x->l_length, x->ms_list.sel_end);
 
-    
+    // Calls paint()
     jbox_redraw(&x->ll_box);
 
-    // Directly initialize the temporary array with values from the MSList struct
     double tempArray[4] = {
         x->ms_list.start,
         x->ms_list.length,
@@ -681,10 +682,7 @@ void ll_mcwaveform_bang(t_ll_mcwaveform *x){
     };
 
     t_atom myList[4];
-    // Use atom_setdouble_array to set the values in myList from tempArray
     atom_setdouble_array(4, myList, 4, tempArray);
-
-    // Now output the list
     outlet_anything(x->ll_box.b_ob.o_outlet, gensym("mslist"), 4, myList);
 }
 
@@ -944,18 +942,30 @@ void ll_mcwaveform_full(t_ll_mcwaveform *x){
         (reread, paint, paint_wf)
 
 *************************************************************************************************/
+
+/*
+    reread
+        Update object drawing, including the waveform
+        In sf_mode, we set sf_read to re-read the audio file into the buffer on drawing
+*/
 void ll_mcwaveform_reread(t_ll_mcwaveform *x){
     x->wf_paint = 1;
     x->sf_read = 1;
     ll_mcwaveform_bang(x);
 }
 
+/*
+    paint
+        Called from bang function only via jbox_redraw().
+        If wf_paint, redraw the waveform separately in paint_wf().
+*/
 void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
     t_rect rect;
     t_jgraphics *g;
     g = (t_jgraphics*) patcherview_get_jgraphics(view);
     jbox_get_rect_for_view((t_object *)x, view, &rect);
 
+    // If display start or length has changed, redraw the waveform.
     if ((x->ms_list.start != x->msold[0]) || (x->ms_list.length != x->msold[1])) 
         x->wf_paint = 1;
 
@@ -968,17 +978,7 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
     jbox_paint_layer((t_object *)x, view, gensym("wf"), 0., 0.);
     jgraphics_set_source_jrgba(g, &x->ll_selcolor);
 
-    double select_start = (x->ms_list.sel_start - x->ms_list.start) / x->ms_list.length * rect.width;
-    double select_end = (x->ms_list.sel_end - x->ms_list.sel_start) / x->ms_list.length * rect.width;
-
-    // if (x->inv_sel_color) {
-    //     jgraphics_rectangle_fill_fast(g, 0, 0, select_start, rect.height);
-    //     jgraphics_rectangle_fill_fast(g, select_end, 0, rect.width - select_end, rect.height);
-    // }
-    // else{
-    //     jgraphics_rectangle_fill_fast(g, select_start, 0, select_end, rect.height);
-    // }
-
+    // Draw selected portion over waveform.
     if (x->inv_sel_color) {
      jgraphics_rectangle_fill_fast(g,0, 0 ,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
      jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,rect.width-(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
@@ -987,6 +987,7 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
      jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,(x->ms_list.sel_end-x->ms_list.sel_start)/x->ms_list.length*rect.width, rect.height);
     }
 
+    // Draw line.
     if(x->linepos >= 0){
         double line_position = (x->linepos - x->ms_list.start) / x->ms_list.length * rect.width;
         jgraphics_set_source_jrgba(g, &x->ll_linecolor);
@@ -997,6 +998,12 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
     jgraphics_stroke(g);
 }
 
+/*
+    paint_wf
+        Read from a buffer~ object and draw the waveform.
+        In sf_mode, we read and write from an internal buffer when necessary.
+        Otherwise, we read directly from the buffer referenced by the user.
+*/
 void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect) {
     long i, j, k, co;
     float stepsize, ro, dispstart_ms, maxf, minf, samplef, v_zeropos, line_len;
@@ -1038,6 +1045,7 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect) {
                 tab = buffer_locksamples(buffer); //lock buffer and get pointer
                 if(!tab){
                     post("buffer disappeared while trying to read!");
+                    x->wf_paint = 0;
                     return;
                 }
                 for (k=0; k<chns; k++){ // vertical-chans
@@ -1101,6 +1109,7 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect) {
     } else if(buffer_ref_exists(x->l_buffer_reference)){ //in set-mode peek from buffer
         tab = buffer_locksamples(buffer);
         if(!tab){
+            x->wf_paint = 0;
             return;
         }
         stepsize = x->ms_list.length * x->l_srms / rect->width; //stepsize in frames
@@ -1150,6 +1159,10 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect) {
 
 *************************************************************************************************/
 
+/*
+    setmousecursor
+        Set cursor appearance.
+*/
 void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
     t_rect rect;
     jbox_get_rect_for_view((t_object *)x, patcherview, &rect);
@@ -1179,19 +1192,17 @@ void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview, t_p
         When the cursor enters the object's viewbox, change the mouse cursor appearance.
 */
 void ll_mcwaveform_mouseenter(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
-    // ll_mcwaveform_mousemove(x, patcherview, pt, modifiers);
     x->mouse_over = 1;
-    ll_mcwaveform_setmousecursor(x,patcherview,pt,modifiers);
+    ll_mcwaveform_setmousecursor(x, patcherview, pt, modifiers);
 }
 
 /*
-    mouseenter
-        When the cursor enters the object's viewbox, change the mouse cursor appearance.
+    mouseleave
+        When the cursor leaves the object's viewbox, change the mouse cursor appearance.
 */
 void ll_mcwaveform_mouseleave(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
-    // ll_mcwaveform_mousemove(x, patcherview, pt, modifiers);
     x->mouse_over = 0;
-    ll_mcwaveform_setmousecursor(x,patcherview,pt,modifiers);
+    ll_mcwaveform_setmousecursor(x, patcherview, pt, modifiers);
 }
 
 /*
@@ -1237,10 +1248,10 @@ void ll_mcwaveform_mousedown(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
                 // Adjust selection based on proximity to start or end.
                 if (fabs(cx - x->ms_list.sel_start) < fabs(cx - x->ms_list.sel_end)){
                     s_ll_ccum.x = (x->ms_list.sel_end - x->ms_list.start) / x->ms_list.length * rect.width;
-                }else {
+                } else {
                     s_ll_ccum.x = (x->ms_list.sel_start - x->ms_list.start) / x->ms_list.length * rect.width;
                 }
-                if(cx < x->ms_list.sel_start)
+                if (cx < x->ms_list.sel_start)
                     x->ms_list.sel_start = cx;
                 else
                     x->ms_list.sel_end = cx;
@@ -1271,9 +1282,8 @@ void ll_mcwaveform_mouseup(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, l
     if (x->sf_mode && (x->mouse_mode == MOUSE_MODE_MOVE))
         ll_mcwaveform_reread(x);
 
-    if(x->mouse_mode == MOUSE_MODE_LOOP || x->mouse_mode == MOUSE_MODE_SELECT){
-        ll_mcwaveform_bang(x);
-    }
+    if(x->mouse_mode == MOUSE_MODE_LOOP || x->mouse_mode == MOUSE_MODE_SELECT)
+        ll_mcwaveform_reread(x);
 }
 
 /*
@@ -1328,7 +1338,6 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
         default:
             break; // No action for default case
     }
-
     ll_mcwaveform_bang(x); // Update UI or state as necessary
 }
 
