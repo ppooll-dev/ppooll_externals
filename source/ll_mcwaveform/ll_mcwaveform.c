@@ -119,7 +119,8 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s);
 void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av);
 void ll_mcwaveform_read(t_ll_mcwaveform *x, t_symbol *s);
 void ll_mcwaveform_doread(t_ll_mcwaveform *x, t_symbol *s);
-
+long ll_mcwaveform_acceptsdrag_unlocked(t_ll_mcwaveform *x, t_object *drag, t_object *view);
+long ll_mcwaveform_acceptsdrag_locked(t_ll_mcwaveform *x, t_object *drag, t_object *view);
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ input types
 void ll_mcwaveform_bang(t_ll_mcwaveform *x);
 void ll_mcwaveform_int(t_ll_mcwaveform *x, long n);
@@ -203,7 +204,8 @@ void ext_main(void *r){
     class_addmethod(c, (method)ll_mcwaveform_set,           "set",        A_SYM, 0);
     class_addmethod(c, (method)ll_mcwaveform_sf,            "sf",         A_GIMME, 0);
     class_addmethod(c, (method)ll_mcwaveform_file,          "file",       A_SYM, 0);
-
+    class_addmethod(c, (method)ll_mcwaveform_acceptsdrag_locked, "acceptsdrag_locked", A_CANT, 0);
+    class_addmethod(c, (method)ll_mcwaveform_acceptsdrag_unlocked, "acceptsdrag_unlocked", A_CANT, 0);
     
     CLASS_ATTR_DEFAULT(c,"patching_rect",0, "0. 0. 200. 100.");
 
@@ -411,9 +413,20 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
 /**************************************************************************************************
     
     Buffer & File Methods
-        (set, file, sf, iterator)
+        (drag&drop, read, file, set, sf, iterator)
 
 *************************************************************************************************/
+long ll_mcwaveform_acceptsdrag_unlocked(t_ll_mcwaveform *x, t_object *drag, t_object *view){
+    if (jdrag_matchdragrole(drag, gensym("audiofile"), 0)) {
+        jdrag_box_add(drag, (t_object *)x, gensym("read"));
+        return true;
+    }
+    return false;
+};
+
+long ll_mcwaveform_acceptsdrag_locked(t_ll_mcwaveform *x, t_object *drag, t_object *view){
+    ll_mcwaveform_acceptsdrag_unlocked(x, drag, view);
+};
 
 /*
     read
