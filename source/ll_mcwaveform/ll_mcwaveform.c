@@ -54,24 +54,21 @@ typedef struct _ll_mcwaveform
     t_jbox      ll_box;
     double      ll_width;
     double      ll_height;
-    
-    char        ll_mouseover;
+    long        ll_rectsize;
+    t_jrgba     ll_wfcolor;
+    t_jrgba     ll_selcolor;
+    t_jrgba     ll_bgcolor;
+    t_jrgba     ll_linecolor;
     char        inv_sel_color;
 
     char        mouse_mode; // none, select, loop, move, draw(?)
     short       mouse_down; // bool
     short       mouse_over; // bool
 
-    short       sf_mode; 
-    short       sf_read;
+    short       sf_mode;    // bool, is soundfile mode
+    short       sf_read;    // bool, needs to reread values from file for drawing
 
-    short       wf_paint;
-
-    long        ll_rectsize;
-    t_jrgba     ll_wfcolor;
-    t_jrgba     ll_selcolor;
-    t_jrgba     ll_bgcolor;
-    t_jrgba     ll_linecolor;
+    short       wf_paint;   // bool, should repaint the waveform
 
     t_buffer_ref *l_buffer_reference;
     t_symbol     *bufname;
@@ -88,13 +85,15 @@ typedef struct _ll_mcwaveform
     unsigned long int l_frames;
 
     t_float     buf_arr[10000][30];
+
     MSList      ms_list;
     double      msold[2];
+
     double      linepos;
     double      vzoom;
+
     long        should_reread;
     long        run_clock;
-
     double      reread_rate;
 
     t_object *buffer;
@@ -201,12 +200,11 @@ void ext_main(void *r){
     class_addmethod(c, (method)ll_mcwaveform_assist,        "assist",     A_CANT, 0);
 
     class_addmethod(c, (method)ll_mcwaveform_read,          "read",       A_DEFSYM, 0);
- 
     class_addmethod(c, (method)ll_mcwaveform_set,           "set",        A_SYM, 0);
     class_addmethod(c, (method)ll_mcwaveform_sf,            "sf",         A_GIMME, 0);
-    class_addmethod(c, (method)ll_mcwaveform_file,          "file",       A_SYM, 0);
-    class_addmethod(c, (method)ll_mcwaveform_acceptsdrag_locked, "acceptsdrag_locked", A_CANT, 0);
-    class_addmethod(c, (method)ll_mcwaveform_acceptsdrag_unlocked, "acceptsdrag_unlocked", A_CANT, 0);
+
+    class_addmethod(c, (method)ll_mcwaveform_acceptsdrag_locked,    "acceptsdrag_locked",   A_CANT, 0);
+    class_addmethod(c, (method)ll_mcwaveform_acceptsdrag_unlocked,  "acceptsdrag_unlocked", A_CANT, 0);
     
     CLASS_ATTR_DEFAULT(c,"patching_rect",0, "0. 0. 200. 100.");
 
@@ -599,28 +597,30 @@ void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
     long i;
     t_atom *ap;
     x->sf_mode = 1;
+
+    // Parse list arguments of sfinfo (file, # channels, samplerate(ms), length(ms))
     for (i = 0, ap = av; i < ac; i++, ap++){
         switch (atom_gettype(ap)) {
             case A_LONG:
                 if (i==1) 
-                    x->l_chan = atom_getlong(ap);
+                    x->l_chan = atom_getlong(ap); // # chanels (ms)
                 if (i==2) 
-                    x->l_srms = atom_getlong(ap) * 0.001;
+                    x->l_srms = atom_getlong(ap) * 0.001; // samplerate (ms)
                 break;
             case A_FLOAT:
                 if (i==3) 
-                    x->l_length = atom_getfloat(ap);
+                    x->l_length = atom_getfloat(ap); // length (ms)
                 break;
             case A_SYM:
                 if (i==0) 
-                    x->path = ap;
+                    x->path = ap; // filename/path
                 break;
             default:
                 break;
         }
     } 
     //process arguments
-    //post("path %s ch %d srms %f len %f",atom_getsym(x->path)->s_name,x->l_chan,x->l_srms,x->l_length);
+
     x->ms_list.start=0;
     x->ms_list.length=x->l_length;
 
@@ -689,6 +689,7 @@ void ll_mcwaveform_bang(t_ll_mcwaveform *x){
 }
 
 void ll_mcwaveform_int(t_ll_mcwaveform *x, long n){
+    //post("int");
     // ll_mcwaveform_float(x, (double)n);
 }
 
@@ -786,10 +787,6 @@ void ll_mcwaveform_mode(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
         list (2 numbers): show "n" channels offset by the 2nd number arg
 */
 void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
-    // Early return if the mode is not set, simplifying nested conditions.
-    // if (x->sf_mode <= -1)
-    //     return;
-
     // Handle single argument case -- set number of channels to display.
     if (ac == 1 && av) {
         long argType = atom_gettype(av);
