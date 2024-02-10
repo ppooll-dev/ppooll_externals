@@ -1098,9 +1098,9 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect) {
                 }   
             }
         }
-    } else { //in set-mode peek from buffer
+    } else if(buffer_ref_exists(x->l_buffer_reference)){ //in set-mode peek from buffer
         tab = buffer_locksamples(buffer);
-        if(!buffer || !buffer_ref_exists(x->l_buffer_reference) || !tab){
+        if(!tab){
             return;
         }
         stepsize = x->ms_list.length * x->l_srms / rect->width; //stepsize in frames
