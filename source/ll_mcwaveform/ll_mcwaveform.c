@@ -310,8 +310,8 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
 
     x->chans = 0;
     x->chan_offset = 0;
-    
-    x->sf_mode = -1;
+
+    x->sf_mode = 0;
     x->sf_read = 0;
 
     x->vzoom = 1.0;
@@ -669,9 +669,8 @@ void ll_mcwaveform_bang(t_ll_mcwaveform *x){
     x->ms_list.sel_start = fmax(0, x->ms_list.sel_start);
     x->ms_list.sel_end = fmin(x->l_length, x->ms_list.sel_end);
 
-    if (x->sf_mode > -1) {
-        jbox_redraw(&x->ll_box);
-    }
+    
+    jbox_redraw(&x->ll_box);
 
     // Directly initialize the temporary array with values from the MSList struct
     double tempArray[4] = {
@@ -788,8 +787,8 @@ void ll_mcwaveform_mode(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
 */
 void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
     // Early return if the mode is not set, simplifying nested conditions.
-    if (x->sf_mode <= -1)
-        return;
+    // if (x->sf_mode <= -1)
+    //     return;
 
     // Handle single argument case -- set number of channels to display.
     if (ac == 1 && av) {
@@ -975,21 +974,21 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
     double select_start = (x->ms_list.sel_start - x->ms_list.start) / x->ms_list.length * rect.width;
     double select_end = (x->ms_list.sel_end - x->ms_list.sel_start) / x->ms_list.length * rect.width;
 
-    if (x->inv_sel_color) {
-        jgraphics_rectangle_fill_fast(g, 0, 0, select_start, rect.height);
-        jgraphics_rectangle_fill_fast(g, select_end, 0, rect.width - select_end, rect.height);
-    }
-    else{
-        jgraphics_rectangle_fill_fast(g, select_start, 0, select_end, rect.height);
-    }
-
     // if (x->inv_sel_color) {
-    //  jgraphics_rectangle_fill_fast(g,0, 0 ,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
-    //  jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,rect.width-(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
+    //     jgraphics_rectangle_fill_fast(g, 0, 0, select_start, rect.height);
+    //     jgraphics_rectangle_fill_fast(g, select_end, 0, rect.width - select_end, rect.height);
     // }
     // else{
-    //  jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,(x->ms_list.sel_end-x->ms_list.sel_start)/x->ms_list.length*rect.width, rect.height);
+    //     jgraphics_rectangle_fill_fast(g, select_start, 0, select_end, rect.height);
     // }
+
+    if (x->inv_sel_color) {
+     jgraphics_rectangle_fill_fast(g,0, 0 ,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
+     jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,rect.width-(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
+    }
+    else{
+     jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,(x->ms_list.sel_end-x->ms_list.sel_start)/x->ms_list.length*rect.width, rect.height);
+    }
 
     if(x->linepos >= 0){
         double line_position = (x->linepos - x->ms_list.start) / x->ms_list.length * rect.width;
@@ -1025,7 +1024,7 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect) {
     jgraphics_rectangle_fill_fast(g, 0 , 0, rect->width, rect->height);
     jgraphics_set_source_jrgba(g, &x->ll_wfcolor);
 
-    if (x->sf_mode == 1){
+    if (x->sf_mode){
         if (x->sf_read){ // missing samples need to be read from soundfile
             stepsize = x->ms_list.length / rect->width; //stepsize in ms
             dispstart_ms = x->ms_list.start;
