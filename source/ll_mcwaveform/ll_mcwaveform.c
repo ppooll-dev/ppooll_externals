@@ -998,147 +998,133 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
     jgraphics_stroke(g);
 }
 
-void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect) {
-    long i, j, k, co;
-    float stepsize, ro, dispstart_ms, maxf, minf, samplef, v_zeropos, line_len;
+void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
+    long i,j,k,co,chns;
     short peek_amt;
-
-    long chns = x->chans == 0 ? x->l_chan : x->chans;
-    long chn_height = rect->height / chns;
+    float r,ro,maxf,minf,cf;
+    
+    double vzoom_amount = x->vzoom;
 
     t_float *tab;
-    t_buffer_obj *buffer = buffer_ref_getobject(x->l_buffer_reference);
 
+    t_buffer_obj *buffer = buffer_ref_getobject(x->l_buffer_reference);
     jbox_invalidate_layer((t_object *)x, NULL, gensym("wf"));
     t_jgraphics *g = jbox_start_layer((t_object *)x, view, gensym("wf"), rect->width, rect->height);
+    
+    if (x->chans == 0)
+        chns = x->l_chan;
+    else 
+        chns = x->chans;
 
-    if(!g){
-        object_error((t_object *)x, "t_jgraphics is NULL.");
-        return;
-    }
+    if (g) {
+        jgraphics_set_source_jrgba(g, &x->ll_bgcolor);
+        jgraphics_rectangle_fill_fast(g, 0 , 0, rect->width, rect->height);
+        jgraphics_set_source_jrgba(g, &x->ll_wfcolor);
+        co = rect->height/chns;
 
-    jgraphics_set_source_jrgba(g, &x->ll_bgcolor);
-    jgraphics_rectangle_fill_fast(g, 0 , 0, rect->width, rect->height);
-    jgraphics_set_source_jrgba(g, &x->ll_wfcolor);
+        if (x->sf_mode == 1){ // sound-file from disk
+            if (x->sf_read){
+                r = x->ms_list.length/rect->width; //stepsize in ms
+                ro = x->ms_list.start;
+                peek_amt = fmax(1,fmin(r*x->l_srms,600));
+                x->l_arr_start = x->ms_list.start;
+                x->l_arr_len = x->ms_list.length;
+                for (i=0; i<rect->width; i++){
+                    atom_setlong(x->msg + 1, i*r+ro);
+                    atom_setlong(x->msg + 2, peek_amt/x->l_srms);
+                    object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
+                    tab = buffer_locksamples(buffer);
+                    if(!tab){
+                        post("buffer disappeared while trying to read!");
+                        return;
+                    }
+                    for (k=0;k<chns;k++){ //k<x->l_chan
+                        maxf=0;
+                        minf=0;
 
-    if (x->sf_mode){
-        if (x->sf_read){ // missing samples need to be read from soundfile
-            stepsize = x->ms_list.length / rect->width; //stepsize in ms
-            dispstart_ms = x->ms_list.start;
-            peek_amt = fmax(1, fmin(stepsize * x->l_srms, 600));
-            //srms (samples per millisecond)
-            //peek_amt is in samples! minimum 1, maximum 600
-            x->l_arr_start = x->ms_list.start;  //??
-            x->l_arr_len = x->ms_list.length;
+                        for (j=0;j<peek_amt;j++){
+                            cf = tab[x->l_chan*j+k+x->chan_offset];
+                            maxf = fmax(cf,maxf) / vzoom_amount;
+                            minf = fmin(cf,minf) / vzoom_amount;
+                        }
+                        
+                        if (minf*-1>maxf) 
+                            maxf = minf;
 
-            for (i = 0; i < rect->width; i++){ //pixelwise in x-direction
-                atom_setlong(x->msg + 1, i * stepsize + dispstart_ms); //start reading at ms
-                atom_setlong(x->msg + 2, peek_amt/x->l_srms); //duration
-                object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
-                tab = buffer_locksamples(buffer); //lock buffer and get pointer
-                if(!tab){
-                    post("buffer disappeared while trying to read!");
-                    return;
+                        x->buf_arr[i][k]= maxf;
+                        if (peek_amt>200){
+                            jgraphics_move_to(g,i,(co/2+k*co)-maxf*co/2);
+                            jgraphics_line_to(g,i,(co/2+k*co)+maxf*co/2);
+                        }
+                        else {
+                            jgraphics_move_to(g,i,(co/2+k*co));
+                            jgraphics_line_to(g,i,(co/2+k*co)-maxf*co/2);
+                        }
+                    }
+                    buffer_unlocksamples(buffer);
                 }
-                for (k=0; k<chns; k++){ // vertical-chans
-                    maxf=0;
-                    minf=0;
-                    for (j=0;j<peek_amt;j++){
-                        samplef = tab[x->l_chan * j + k + x->chan_offset]; //peek the buffer
-                        maxf = fmax(samplef,maxf) / x->vzoom; //find max
-                        minf = fmin(samplef,minf) / x->vzoom; //find min
-                    }
-
-                    if (minf*-1 > maxf) 
-                        maxf = minf;
-
-                    x->buf_arr[i][k] = maxf; //############## write into array
-                    v_zeropos = (chn_height / 2 + k * chn_height);
-                    line_len = maxf * chn_height / 2;
-
-                    if (peek_amt > 10){ //draw up and down
-                        jgraphics_move_to(g, i, v_zeropos + line_len);
-                        jgraphics_line_to(g, i, v_zeropos - line_len);
-                    }
-                    else {  //draw only in direction of fmax
-                        jgraphics_move_to(g, i, v_zeropos);
-                        jgraphics_line_to(g, i, v_zeropos - line_len);
-                    }
-                }
-                buffer_unlocksamples(buffer);
-            }
-            x->sf_read = 0;
-        }
-        else{  //draw from previously stored array
-            long xarr;
-            stepsize = x->ms_list.length / x->l_arr_len; //stepsize in array r
-            dispstart_ms = rect->width * (x->ms_list.start - x->l_arr_start) / x->l_arr_len;
-            peek_amt = fmax(1, fmin(x->l_srms * x->ms_list.length / rect->width, 600));
-            
-            for (i=0; i<rect->width; i++){
-                for (k=0; k<chns; k++){ //k<x->l_chan
-                    xarr = (int)round(i * stepsize + dispstart_ms);
-
-                    if (xarr >= 0 && xarr <= rect->width)
-                        maxf = x->buf_arr[xarr][k + x->chan_offset];
+                x->sf_read = 0;
+            }else{
+                long xarr;
+                r = x->ms_list.length/x->l_arr_len; //stepsize in array
+                ro = rect->width*(x->ms_list.start-x->l_arr_start)/x->l_arr_len;
+                peek_amt = fmax(1,fmin(x->l_srms*x->ms_list.length/rect->width,600));
+                
+                for (i=0; i<rect->width; i++){for (k=0;k<chns;k++){ //k<x->l_chan
+                    xarr = (int)round(i*r+ro);
+                    if (xarr>=0 && xarr<=rect->width) 
+                        maxf = x->buf_arr[xarr][k+x->chan_offset]; 
                     else 
                         maxf = 0;
 
-                    v_zeropos = (chn_height / 2) + (k * chn_height);
-                    line_len = (maxf / x->vzoom) * (chn_height / 2);
-
-                    if (peek_amt > 10){ //draw up and down
-                        jgraphics_move_to(g, i, v_zeropos + line_len);
-                        jgraphics_line_to(g, i, v_zeropos - line_len);
+                    if (peek_amt>200){
+                        jgraphics_move_to(g, i, (co/2+k*co) - maxf*co/2);
+                        jgraphics_line_to(g, i, (co/2+k*co) + maxf*co/2);
                     }
-                    else {  //draw only in direction of fmax
-                        jgraphics_move_to(g, i, v_zeropos);
-                        jgraphics_line_to(g, i, v_zeropos - line_len);
+                    else {
+                        jgraphics_move_to(g, i, (co/2+k*co));
+                        jgraphics_line_to(g, i, (co/2+k*co) - maxf*co/2);
                     }
-                }   
+                    
+                }}
             }
         }
-    } else if(buffer_ref_exists(x->l_buffer_reference)){ //in set-mode peek from buffer
-        tab = buffer_locksamples(buffer);
-        if(!tab){
-            return;
-        }
-        stepsize = x->ms_list.length * x->l_srms / rect->width; //stepsize in frames
-        ro = x->ms_list.start * x->l_srms; //dispstart in samples
-        peek_amt = fmax(1, fmin(stepsize, 600));
-        //post("peakamount %d stepsize %f", peek_amt,stepsize);
-        for (i=0; i<rect->width; i++){
-            for (k=0; k<chns; k++){
-                maxf = 0;
-                minf = 0;
-    
-                for (j=0; j<peek_amt; j++){
-                    samplef = tab[x->l_chan * ((int)roundl(i * stepsize + ro) + j) + k + x->chan_offset];
-                    maxf = fmax(samplef, maxf) / x->vzoom;
-                    minf = fmin(samplef, minf) / x->vzoom;
-                }
-    
-                if ((minf * -1) > maxf) 
-                    maxf = minf;
-    
-                v_zeropos = chn_height / 2 + k * chn_height;
-                line_len = maxf * chn_height / 2;
-                if (peek_amt > 10){ //draw up and down
-                    jgraphics_move_to(g, i, v_zeropos + line_len);
-                    jgraphics_line_to(g, i, v_zeropos - line_len);
-                }
-                else {  //draw only in direction of fmax
-                    jgraphics_move_to(g, i, v_zeropos);
-                    jgraphics_line_to(g, i, v_zeropos - line_len);
-                }
-            }   
-        }
+        else if(buffer_ref_exists(x->l_buffer_reference)){
+            r = x->ms_list.length*x->l_srms/rect->width; //stepsize in frames
+            ro = x->ms_list.start*x->l_srms;
+            peek_amt = fmax(1,fmin(r,600));
+            for (i=0; i<rect->width; i++){
+                for (k=0;k<chns;k++){ //k<x->l_chan
+                    maxf=0;minf=0;
+                    for (j=0;j<peek_amt;j++){
+                        tab = buffer_locksamples(buffer);
+                        if(buffer && buffer_ref_exists(x->l_buffer_reference) && tab){
+                            cf = tab[x->l_chan*((int)roundl(i*r+ro)+j)+k+x->chan_offset];
+                            buffer_unlocksamples(buffer);
 
-        buffer_unlocksamples(buffer);
+                            maxf = fmax(cf,maxf) / vzoom_amount;
+                            minf = fmin(cf,minf) / vzoom_amount;
+                        }
+                    }
+                    if (minf*-1>maxf) 
+                        maxf = minf;
+
+                    if (peek_amt>200){
+                        jgraphics_move_to(g, i, (co/2+k*co) - maxf*co/2);
+                        jgraphics_line_to(g, i, (co/2+k*co) + maxf*co/2);
+                    }
+                    else {
+                        jgraphics_move_to(g, i, (co/2+k*co));
+                        jgraphics_line_to(g, i, (co/2+k*co) - maxf*co/2);
+                    }
+                }
+            }
+        }
+        jgraphics_set_line_width(g, 1);
+        jgraphics_stroke(g);
+        jbox_end_layer((t_object *)x, view, gensym("wf"));
     }
-    jgraphics_set_line_width(g, 1);
-    jgraphics_stroke(g);
-    jbox_end_layer((t_object *)x, view, gensym("wf"));
+    //jbox_paint_layer((t_object *)x, view, gensym("wf"), 0., 0.);  // position of the layer
     x->wf_paint = 0;
 }
 
