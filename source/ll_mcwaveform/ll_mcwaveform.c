@@ -46,6 +46,8 @@ typedef struct {
     double sel_end;
 } MSList;
 
+t_fourcc audiotypes[] = {'AIFF', 'WAVE', 'MP3 ', 'FLAC', 'M4A '};
+short naudiotypes = sizeof(audiotypes) / sizeof(t_fourcc); // Calculate the number of types
 
 typedef struct _ll_mcwaveform
 {
@@ -115,6 +117,9 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
 void ll_mcwaveform_set(t_ll_mcwaveform *x, t_symbol *s);
 void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s);
 void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av);
+void ll_mcwaveform_read(t_ll_mcwaveform *x, t_symbol *s);
+void ll_mcwaveform_doread(t_ll_mcwaveform *x, t_symbol *s);
+
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ input types
 void ll_mcwaveform_bang(t_ll_mcwaveform *x);
 void ll_mcwaveform_int(t_ll_mcwaveform *x, long n);
@@ -180,7 +185,7 @@ void ext_main(void *r){
     class_addmethod(c, (method)ll_mcwaveform_selend,        "selend",     A_FLOAT, 0);
     class_addmethod(c, (method)ll_mcwaveform_zoom2sel,      "zoom2sel",   0);
     class_addmethod(c, (method)ll_mcwaveform_sel_all,       "sel_all",    0);
-    class_addmethod(c, (method)ll_mcwaveform_sel_disp,      "sel_disp",    0);
+    class_addmethod(c, (method)ll_mcwaveform_sel_disp,      "sel_disp",   0);
     class_addmethod(c, (method)ll_mcwaveform_full,          "full",       0);
     class_addmethod(c, (method)ll_mcwaveform_reread,        "reread",     0);
     class_addmethod(c, (method)ll_mcwaveform_notify,        "notify",     A_CANT, 0);
@@ -192,6 +197,8 @@ void ext_main(void *r){
     class_addmethod(c, (method)ll_mcwaveform_mouseenter,    "mouseenter", A_CANT, 0);
 
     class_addmethod(c, (method)ll_mcwaveform_assist,        "assist",     A_CANT, 0);
+
+    class_addmethod(c, (method)ll_mcwaveform_read,          "read",       A_DEFSYM, 0);
  
     class_addmethod(c, (method)ll_mcwaveform_set,           "set",        A_SYM, 0);
     class_addmethod(c, (method)ll_mcwaveform_sf,            "sf",         A_GIMME, 0);
@@ -409,6 +416,51 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
 *************************************************************************************************/
 
 /*
+    read
+        Imitates Max default "read" messages.
+        Can include filename/path as second argument.
+        Without it, use Open Dialog for selection.
+*/
+void ll_mcwaveform_read(t_ll_mcwaveform *x, t_symbol *s){
+    defer(x, (method)ll_mcwaveform_doread, s, 0, NULL);
+}
+
+/*
+    file
+        Set the waveform by filename.
+        This method uses the miniaudio decoder to parse the audio file header.
+*/
+void ll_mcwaveform_doread(t_ll_mcwaveform *x, t_symbol *s){
+    t_fourcc typechosen; // This points to the selected file's type after the dialog
+    
+    char filename[MAX_PATH_CHARS];
+    char fullpath[MAX_PATH_CHARS];  
+
+    short path;
+
+    t_symbol *filepath_symbol;
+ 
+    if (s != gensym("")) {  
+        ll_mcwaveform_file(x, s);
+        return;
+    }
+
+    // If no filename/path argument, select file with Open Dialog
+    if (open_dialog(filename, &path, &typechosen, &audiotypes, &naudiotypes))       // non-zero: user cancelled
+        return;
+
+    // Convert Path ID and filename to a fully qualified pathname
+    if (path_topathname(path, filename, fullpath) != 0) {
+        // Handle error if path cannot be converted
+        object_error((t_object *)x, "Error converting to full path for file: %s", filename);
+        return;
+    }
+    // Convert the fullpath to a symbol for further use
+    filepath_symbol = gensym(fullpath);
+    ll_mcwaveform_file(x, gensym(fullpath));
+}
+
+/*
     set
         Set the waveform by buffer~ name
 */
@@ -436,45 +488,35 @@ void ll_mcwaveform_set(t_ll_mcwaveform *x, t_symbol *s){
 
 /*
     file
-        Set the waveform by filename.
+        Set the waveform by filename (if in Max search path) or full filepath (in Max format & style).
+        This method uses the miniaudio decoder to parse the audio file header.
 */
 void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
     t_float *tab;
     x->sf_mode = 1;
 
-    t_fourcc filetypelist[] = {FOUR_CHAR_CODE('AIFF'), FOUR_CHAR_CODE('WAVE')};
-    short numtypes = 2; 
-    // Assume 's' is your input t_symbol* representing the file path
-    // post("Resolving path for: %s", s->s_name);
-    t_symbol *full_path = NULL; // This will hold the resolved full path
-    t_max_err err = path_absolutepath(&full_path, s, filetypelist, numtypes);
-
+    t_symbol *full_path = NULL; // This will hold the resolved full path (Max Format)
+    t_max_err err = path_absolutepath(&full_path, s, audiotypes, naudiotypes);
     if (err != MAX_ERR_NONE) {
-        post("Error resolving absolute path.");
+        object_error((t_object *)x, "Error resolving absolute path: \n%s",s->s_name);
         return; // Make sure to exit if there's an error
     }
 
-    char filePath[MAX_PATH_CHARS]; // Buffer for POSIX path
     // Convert the Max path to a native system path in absolute form
+    char filePath[MAX_PATH_CHARS]; // This will hold the POSIX path
     if (path_nameconform(full_path->s_name, filePath, PATH_STYLE_MAX, PATH_TYPE_BOOT) != MAX_ERR_NONE) {
-        post("Error converting path to POSIX format.");
+        object_error((t_object *)x, "Error converting path to POSIX format: \n%s",full_path->s_name);
         return;
     }
-    // post("POSIX path: %s", filePath);
-    ma_decoder decoder;
-    ma_result result;
 
     // Initialize the decoder to read the file's properties
+    ma_decoder decoder;
+    ma_result result;
     result = ma_decoder_init_file(filePath, NULL, &decoder);
     if (result != MA_SUCCESS) {
-        post("Failed to initialize decoder for file '%s'.", filePath);
+        object_error((t_object *)x, "Failed to initialize decoder for file '%s'.", filePath);
         return; // Adjust return type or handling based on your function's design
     }
-
-    // Assuming you want to print out the properties to the Max console
-    // post("File: %s", filePath);
-    // post("Sample Rate: %d Hz", decoder.outputSampleRate);
-    // post("Channels: %d", decoder.outputChannels);
 
     ma_uint64 totalFrames = 0; // Declare a variable to hold the total frames
     ma_result frameResult;
@@ -482,16 +524,14 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
     // Call the function with the correct arguments
     frameResult = ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames);
     if (frameResult != MA_SUCCESS) {
-        post("Failed to get length in PCM frames.");
+        object_error((t_object *)x, "Failed to get length in PCM frames: \n%s",full_path->s_name);
         ma_decoder_uninit(&decoder); // Make sure to uninitialize the decoder to avoid resource leaks
         return; // Adjust based on your function's return type and error handling strategy
     }
 
     // Now, you can use totalFrames as it contains the total number of PCM frames
     double lengthInMs = totalFrames / (double)decoder.outputSampleRate * 1000;
-    post("Length: %fms", lengthInMs);
-    // post("Total Number of Samples: %llu (across all channels)", totalFrames * decoder.outputChannels);
-
+    
     // Clean up
     ma_decoder_uninit(&decoder);
 
@@ -502,7 +542,7 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
         buffer_ref_set(x->l_buffer_reference, x->bufname);
     }
 
-	// Get the sound file info (sfinfo)
+	// Set the sound file info (sfinfo)
 	t_buffer_obj *buffer = buffer_ref_getobject(x->l_buffer_reference);
 	x->l_chan = decoder.outputChannels;
 	x->l_frames = totalFrames;
@@ -521,7 +561,6 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
     atom_setdouble_array(1, sfinfo_list + 3, 1, tempArray);
     outlet_anything(x->ll_box.b_ob.o_outlet, gensym("sf"), 4, sfinfo_list);
 
-
 	// Init 600ms buffer for reading file in chunks
 	atom_setlong(x->msg, 600);
 	object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
@@ -533,7 +572,6 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
 
 	x->sf_read = 1;
 	x->wf_paint = 1;
-    // ll_mcwaveform_bang(x);
 	ll_mcwaveform_bang(x);
 } 
 
@@ -989,8 +1027,8 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
                     maxf=0;minf=0;
                         for (j=0;j<peek_amt;j++){
                             samplef = tab[x->l_chan * j + k + x->chan_offset]; //peek the buffer
-                            maxf = fmax(samplef,maxf); //find max
-                            minf = fmin(samplef,minf); //find min
+                            maxf = fmax(samplef,maxf) / x->vzoom; //find max
+                            minf = fmin(samplef,minf) / x->vzoom; //find min
                         }
                     if (minf*-1 > maxf) maxf = minf;
                     x->buf_arr[i][k] = maxf; //############## write into array
@@ -1023,7 +1061,7 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
                         else maxf = 0;
 
                         v_zeropos = (chn_height/2 + k*chn_height);
-                        line_len = maxf*chn_height/2;
+                        line_len = maxf*chn_height/2 / x->vzoom;
                         if (peek_amt>10){ //draw up and down
                             jgraphics_move_to(g,i,v_zeropos + line_len);
                             jgraphics_line_to(g,i,v_zeropos - line_len);
@@ -1046,8 +1084,8 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect){
                     maxf=0;minf=0;
                     for (j=0;j<peek_amt;j++){
                         samplef = tab[x->l_chan*((int)roundl(i*stepsize+ro)+j)+k+x->chan_offset];
-                        maxf = fmax(samplef,maxf);
-                        minf = fmin(samplef,minf);
+                        maxf = fmax(samplef,maxf) / x->vzoom;
+                        minf = fmin(samplef,minf) / x->vzoom;
                     }
                     if (minf*-1>maxf) maxf = minf;
 
