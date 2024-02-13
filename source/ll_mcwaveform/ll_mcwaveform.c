@@ -25,9 +25,6 @@
 #include <stdio.h>
 #include <math.h>
 
-#define MINIAUDIO_IMPLEMENTATION
-#include "miniaudio.h"
-
 static t_class  *s_ll_mcwaveform_class = 0;
 static t_pt s_ll_mcwaveform_cum; // mouse tracking
 static t_pt s_ll_ccum;
@@ -48,8 +45,9 @@ typedef struct {
     double sel_end;
 } MSList;
 
-t_fourcc audiotypes[] = {'AIFF', 'WAVE', 'MP3 ', 'FLAC', 'M4A '};
-short naudiotypes = sizeof(audiotypes) / sizeof(t_fourcc);
+
+static t_fourcc s_types[20];
+static short s_numtypes = 0;
 
 typedef struct _ll_mcwaveform
 {
@@ -99,7 +97,7 @@ typedef struct _ll_mcwaveform
     double      vzoom;      // vertical zoom attribute value
     double      vzoom_adj;  // vertical zoom scaled value (to use for painting)
 
-
+    
     t_object    *buffer;    // buffer~
     t_atom      *path;      // Path to the sound file source
 
@@ -305,6 +303,24 @@ void ext_main(void *r){
     CLASS_ATTR_ATTR_PARSE(c, "color","save", USESYM(long), 0, "0");
 
     class_register(CLASS_BOX, c);
+    
+    // Supported Audio Formats
+    s_numtypes = 0;
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('AIFF');
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('AIFC');
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('ULAW');     // next/sun typed by peak and others
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('WAVE');
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('FLAC');
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('Sd2f');
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('QQQQ');     // or whatever IRCAM snd files are saved as...
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('BINA');     // or whatever IRCAM snd files are saved as...
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('NxTS');     // next/sun typed by soundhack
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('Mp3 ');
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('DATA');     // our own 'raw' files
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('M4a ');
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('CAF ');
+    s_types[s_numtypes++] = FOUR_CHAR_CODE('wv64');
+    
     s_ll_mcwaveform_class = c;
 }
 
@@ -382,7 +398,6 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
     if(!x->buffer){
         object_error((t_object *)x, "Error creating internal buffer.");
     }
-
     x->bufname = unique_id;
 
     x->m_clock = clock_new((t_ll_mcwaveform *)x, (method)ll_mcwaveform_task);
@@ -514,8 +529,7 @@ void ll_mcwaveform_doread(t_ll_mcwaveform *x, t_symbol *s){
     
     char filename[MAX_PATH_CHARS];
     char fullpath[MAX_PATH_CHARS];
-
-    short path;
+    short path; // Path ID
 
     t_symbol *filepath_symbol;
  
@@ -525,7 +539,7 @@ void ll_mcwaveform_doread(t_ll_mcwaveform *x, t_symbol *s){
     }
 
     // If no filename/path argument, select file with Open Dialog
-    if (open_dialog(filename, &path, &typechosen, &audiotypes, &naudiotypes)) // non-zero: user cancelled
+    if (open_dialog(filename, &path, &typechosen, s_types, s_numtypes)) // non-zero: user cancelled
         return;
 
     // Convert Path ID and filename to a fully qualified pathname
@@ -575,42 +589,31 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
     x->sf_mode = 1;
 
     t_symbol *full_path = NULL; // This will hold the resolved full path (Max Format)
-    t_max_err err = path_absolutepath(&full_path, s, audiotypes, naudiotypes);
+    t_max_err err = path_absolutepath(&full_path, s, s_types, s_numtypes);
     if (err != MAX_ERR_NONE) {
         object_error((t_object *)x, "Error resolving absolute path: \n%s",s->s_name);
         return; // Make sure to exit if there's an error
     }
-    // Convert the Max path to a native system path in absolute form
-    char filePath[MAX_PATH_CHARS]; // This will hold the POSIX path
-    if (path_nameconform(full_path->s_name, filePath, PATH_STYLE_MAX, PATH_TYPE_BOOT) != MAX_ERR_NONE) {
-        object_error((t_object *)x, "Error converting path to POSIX format: \n%s",full_path->s_name);
+    
+    const char *filename = full_path->s_name;
+    
+    t_object *reader = (t_object *) object_new(CLASS_NOBOX, gensym("jsoundfile"));
+    if(!reader){
+        object_error((t_object *)x, "Error creating jsoundfile.");
+    }
+    
+    err = (t_max_err) object_method(reader, gensym("open"), 1, filename, 0, 0);
+    if (err != MAX_ERR_NONE) {
+        object_error((t_object *)x, "Error occurred while opening file: %ld", err);
         return;
     }
-    // Initialize the decoder to read the file's properties
-    ma_decoder decoder;
-    ma_result result;
-    result = ma_decoder_init_file(filePath, NULL, &decoder);
-    if (result != MA_SUCCESS) {
-        object_error((t_object *)x, "Failed to initialize decoder for file '%s'.", filePath);
-        return; // Adjust return type or handling based on your function's design
-    }
-    ma_uint64 totalFrames = 0; // Declare a variable to hold the total frames
-    ma_result frameResult;
 
-    // Call the function with the correct arguments
-    frameResult = ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames);
-    if (frameResult != MA_SUCCESS) {
-        object_error((t_object *)x, "Failed to get length in PCM frames: \n%s",full_path->s_name);
-        ma_decoder_uninit(&decoder); // Make sure to uninitialize the decoder to avoid resource leaks
-        return; // Adjust based on your function's return type and error handling strategy
-    }
-
-    // Now, you can use totalFrames as it contains the total number of PCM frames
-    double lengthInMs = totalFrames / (double)decoder.outputSampleRate * 1000;
+    long channels = (t_atom_long) object_method(reader, gensym("getchannelcount"));
+    long frames = (t_atom_long) object_method(reader, gensym("getlength"));
     
-    // Clean up
-    ma_decoder_uninit(&decoder);
-
+    object_method(reader, gensym("close"));
+    object_free(reader);
+    
     // Set reference to buffer -- is this already done?
     if (!x->l_buffer_reference){
         x->l_buffer_reference = buffer_ref_new((t_object *)x, x->bufname);
@@ -618,13 +621,22 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
         buffer_ref_set(x->l_buffer_reference, x->bufname);
     }
 
-    // Set the sound file info (sfinfo)
+    // Init 600ms buffer for reading file in chunks
     t_buffer_obj *buffer = buffer_ref_getobject(x->l_buffer_reference);
-    x->l_chan = decoder.outputChannels;
-    x->l_frames = totalFrames;
-    x->l_srms = decoder.outputSampleRate / 1000;
-    x->l_length = x->l_frames / x->l_srms;
-
+    atom_setlong(x->msg, 600);
+    object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
+    atom_setsym(x->msg, s);        // filename
+    atom_setlong(x->msg + 1, 0);
+    atom_setlong(x->msg + 2, 600);
+    atom_setlong(x->msg + 3, channels);
+    object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
+    
+    // Set Sound File Properties (sfinfo~)
+    x->l_chan = channels;
+    x->l_frames = frames;
+    x->l_srms = buffer_getmillisamplerate(buffer);
+    x->l_length = ((double)x->l_frames) / x->l_srms;
+    
     x->ms_list.start = 0;
     x->ms_list.length = x->l_length;
 
@@ -632,20 +644,10 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
     t_atom sfinfo_list[4];
     atom_setsym(sfinfo_list, full_path);
     atom_setlong(sfinfo_list + 1, x->l_chan);
-    atom_setlong(sfinfo_list + 2, decoder.outputSampleRate);
-    double tempArray[1] = { x->ms_list.length };
-    atom_setdouble_array(1, sfinfo_list + 3, 1, tempArray);
+    atom_setfloat(sfinfo_list + 2, x->l_srms * 1000.); // Output sample rate directly
+    atom_setfloat(sfinfo_list + 3, x->l_length); // Output length directly
     outlet_anything(x->ll_box.b_ob.o_outlet, gensym("sf"), 4, sfinfo_list);
-
-    // Init 600ms buffer for reading file in chunks
-    atom_setlong(x->msg, 600);
-    object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
-    atom_setsym(x->msg, s);        // filename
-    atom_setlong(x->msg + 1, 0);
-    atom_setlong(x->msg + 2, 600);
-    atom_setlong(x->msg + 3, x->l_chan);
-    object_method_typed(x->buffer, gensym("read"), 4, x->msg, &x->rv);
-
+    
     x->sf_read = 1;
     x->wf_paint = 1;
     ll_mcwaveform_bang(x);
