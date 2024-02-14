@@ -14,14 +14,16 @@
 #include "ext_obex.h"
 #include "ext_common.h"
 #include "ext_expr.h"
-#include "ext_obex.h" //for atom routines
-#include "jpatcher_api.h"
-#include "jgraphics.h"
+#include "ext_obex.h"
 #include "ext_parameter.h"
-//#include "common/commonsyms.c"
 #include "ext_systhread.h"
 #include "ext_buffer.h"
+
+#include "jpatcher_api.h"
+#include "jgraphics.h"
+
 #include "z_dsp.h"
+
 #include <stdio.h>
 #include <math.h>
 
@@ -582,50 +584,53 @@ void ll_mcwaveform_set(t_ll_mcwaveform *x, t_symbol *s){
 /*
     file
         Set the waveform by filename (if in Max search path) or full filepath (in Max format & style).
-        This method uses the miniaudio decoder to parse the audio file header.
+        This method uses the "jsoundfile" CLASS_NOBOX object to parse the audio file header a la sfinfo~.
 */
 void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
     t_float *tab;
     x->sf_mode = 1;
-
+    
+    // Get full filepath for jsoundfile.
     t_symbol *full_path = NULL; // This will hold the resolved full path (Max Format)
     t_max_err err = path_absolutepath(&full_path, s, s_types, s_numtypes);
     if (err != MAX_ERR_NONE) {
         object_error((t_object *)x, "Error resolving absolute path: \n%s",s->s_name);
-        return; // Make sure to exit if there's an error
+        return;
     }
-    
-    const char *filename = full_path->s_name;
-    
+    // Create instance of jsoundfile to get audio file header information
     t_object *reader = (t_object *) object_new(CLASS_NOBOX, gensym("jsoundfile"));
     if(!reader){
-        object_error((t_object *)x, "Error creating jsoundfile.");
+        object_error((t_object *)x, "Error creating object 'jsoundfile'.");
+        return;
     }
-    
+    // Open file in jsoundfile
+    const char *filename = full_path->s_name;
     err = (t_max_err) object_method(reader, gensym("open"), 1, filename, 0, 0);
     if (err != MAX_ERR_NONE) {
         object_error((t_object *)x, "Error occurred while opening file: %ld", err);
         return;
     }
-
+    // Get number of channels and frames.
     long channels = (t_atom_long) object_method(reader, gensym("getchannelcount"));
     long frames = (t_atom_long) object_method(reader, gensym("getlength"));
     
+    // Free jsoundfle object pointer.
     object_method(reader, gensym("close"));
     object_free(reader);
     
     // Set reference to buffer -- is this already done?
-    if (!x->l_buffer_reference){
+    if (!x->l_buffer_reference)
         x->l_buffer_reference = buffer_ref_new((t_object *)x, x->bufname);
-    }else{
+    else
         buffer_ref_set(x->l_buffer_reference, x->bufname);
-    }
 
-    // Init 600ms buffer for reading file in chunks
+    // Set buffer size in samples to 600.
     t_buffer_obj *buffer = buffer_ref_getobject(x->l_buffer_reference);
     atom_setlong(x->msg, 600);
     object_method_typed(x->buffer, gensym("sizeinsamps"), 1, x->msg, &x->rv);
-    atom_setsym(x->msg, s);        // filename
+    
+    // Read first 600 samples of the file into the buffer.
+    atom_setsym(x->msg, s);
     atom_setlong(x->msg + 1, 0);
     atom_setlong(x->msg + 2, 600);
     atom_setlong(x->msg + 3, channels);
@@ -636,11 +641,11 @@ void ll_mcwaveform_file(t_ll_mcwaveform *x, t_symbol *s){
     x->l_frames = frames;
     x->l_srms = buffer_getmillisamplerate(buffer);
     x->l_length = ((double)x->l_frames) / x->l_srms;
-    
+    // Set Start & Length
     x->ms_list.start = 0;
     x->ms_list.length = x->l_length;
 
-    // Output sfinfo
+    // Output sfinfo through outlet.
     t_atom sfinfo_list[4];
     atom_setsym(sfinfo_list, full_path);
     atom_setlong(sfinfo_list + 1, x->l_chan);
@@ -1032,11 +1037,12 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
         x->msold[1] = x->ms_list.length;
         x->wf_paint = 1;
     }
-
+    
+    // If channels have changed, redraw the waveform.
     if(x->chans != x->chans_old || x->chan_offset != x->chan_offset_old) {
         x->wf_paint = 1;
         x->chans_old = x->chans;
-        x->chan_offset_old = 0;
+        x->chan_offset_old = x->chan_offset;
     }
 
     if (x->wf_paint)
@@ -1046,12 +1052,24 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
     jgraphics_set_source_jrgba(g, &x->ll_selcolor);
 
     // Draw selected portion over waveform.
-    if (x->inv_sel_color) {
-     jgraphics_rectangle_fill_fast(g,0, 0 ,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
-     jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,rect.width-(x->ms_list.sel_end-x->ms_list.start)/x->ms_list.length*rect.width, rect.height);
-    }
-    else{
-     jgraphics_rectangle_fill_fast(g,(x->ms_list.sel_start-x->ms_list.start)/x->ms_list.length*rect.width, 0 ,(x->ms_list.sel_end-x->ms_list.sel_start)/x->ms_list.length*rect.width, rect.height);
+    double startRatio = (x->ms_list.sel_start - x->ms_list.start) / x->ms_list.length;
+    double endRatio = (x->ms_list.sel_end - x->ms_list.start) / x->ms_list.length;
+    double selWidth = (x->ms_list.sel_end - x->ms_list.sel_start) / x->ms_list.length * rect.width;
+
+    // Calculate the width of the entire selection and its starting position
+    double startX = startRatio * rect.width;
+    double endX = endRatio * rect.width;
+
+    // Draw selected portion over waveform based on the inv_sel_color flag
+    if (x->inv_sel_color) { 
+        // Draw rectangle from start of the waveform to the start of the selection
+        jgraphics_rectangle_fill_fast(g, 0, 0, startX, rect.height);
+        // Draw rectangle from the end of the selection to the end of the waveform
+        double nonSelWidth = rect.width - endX;
+        jgraphics_rectangle_fill_fast(g, endX, 0, nonSelWidth, rect.height);
+    } else {
+        // If inv_sel_color is false, draw a single rectangle to represent the selected area
+        jgraphics_rectangle_fill_fast(g, startX, 0, selWidth, rect.height);
     }
 
     // Draw line.
