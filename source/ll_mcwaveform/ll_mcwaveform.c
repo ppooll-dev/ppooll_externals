@@ -80,8 +80,6 @@ typedef struct _ll_mcwaveform
 
     long        chans;
     long        chan_offset;
-    long        chans_old;
-    long        chan_offset_old;
 
     // Source Buffer/File Properties
     long        l_chan;         // Total channels
@@ -92,14 +90,12 @@ typedef struct _ll_mcwaveform
     t_float     buf_arr[10000][30];
 
     MSList      ms_list;    // start, display, sel_start, sel_end
-    double      msold[2];   // last redrawn values for start & display
 
     double      linepos;    // Line Position (ms)
 
     double      vzoom;      // vertical zoom attribute value
     double      vzoom_adj;  // vertical zoom scaled value (to use for painting)
 
-    
     t_object    *buffer;    // buffer~
     t_atom      *path;      // Path to the sound file source
 
@@ -171,7 +167,7 @@ void ll_mcwaveform_mousemove(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ basic
 void ext_main(void *r){
     t_class *c;
-    common_symbols_init();
+//    common_symbols_init();
     c = class_new("ll_mcwaveform",
                   (method)ll_mcwaveform_new,
                   (method)ll_mcwaveform_free,
@@ -374,13 +370,8 @@ void *ll_mcwaveform_new(t_symbol *s, short argc, t_atom *argv){
     x->ms_list.sel_start = 0.;
     x->ms_list.sel_end = 0.;
 
-    x->msold[0] = -1;
-    x->msold[1] = -1;
-
     x->chans = 0;
     x->chan_offset = 0;
-    x->chans_old = 0;
-    x->chan_offset_old = 0;
 
     x->sf_mode = 0;
     x->sf_read = 0;
@@ -440,9 +431,6 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
             x->sf_read = 0;
             x->should_reread = 0;
 
-            x->msold[0]=0.;
-            x->msold[1]=0.;
-
             x->ms_list.start = 0;
             x->ms_list.length = 0;
             x->ms_list.sel_start = 0;
@@ -453,10 +441,8 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
             x->chans = 0;
             x->chan_offset = 0;
 
-            x->chans_old = 0;
-            x->chan_offset_old = 0;
             x->sf_mode = 0;
-
+            
             ll_mcwaveform_bang(x);
         }else{
             // post("buffer added?");  // Buffer added
@@ -776,7 +762,7 @@ void ll_mcwaveform_list(t_ll_mcwaveform *x, t_symbol *s, short ac, t_atom *av){
         x->ms_list.sel_end = tempArray[3];
         //post("h %lf %lf %lf %lf", x->ms_list.start,x->ms_list.length,x->ms_list.sel_start,x->ms_list.sel_end);
     }
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_reread(x);
 }
 
 
@@ -849,13 +835,15 @@ void ll_mcwaveform_mode(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
 */
 void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
     // Handle single argument case -- set number of channels to display.
+    long new_chans = 0;
+    long new_chans_offset = 0;
     if (ac == 1 && av) {
         long argType = atom_gettype(av);
         switch (argType) {
             case A_SYM:
                 // Check if the argument is "all" to set channels to l_chan, else error.
                 if (strcmp(atom_getsym(av)->s_name, "all") == 0) {
-                    x->chans = x->l_chan;
+                    new_chans = x->l_chan;
                 } else {
                     object_error((t_object *)x, "bad argument for message chans");
                     return;
@@ -863,7 +851,7 @@ void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
                 break;
             case A_LONG:
                 // Set channels directly from the argument.
-                x->chans = atom_getlong(av);
+                new_chans = atom_getlong(av);
                 break;
             case A_FLOAT:
                 // Float arguments not supported for this message.
@@ -877,8 +865,8 @@ void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
     }
     // Handle two arguments case -- set number of channels to display & channel offset.
     else if (ac == 2 && av && atom_gettype(&av[0]) == A_LONG && atom_gettype(&av[1]) == A_LONG) {
-        x->chans = atom_getlong(&av[0]);
-        x->chan_offset = atom_getlong(&av[1]);
+        new_chans = atom_getlong(&av[0]);
+        new_chans_offset = atom_getlong(&av[1]);
     }
     else {
         // Handle invalid number of arguments or types.
@@ -887,13 +875,17 @@ void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
     }
 
     // Validate and correct `chans` and `chan_offset` values.
-    if (x->chans == 0) {
-        x->chans = x->l_chan;
+    if (new_chans == 0) {
+        new_chans = x->l_chan;
     }
-    x->chans = fmaxl(1, fminl(x->chans, x->l_chan));
-    x->chan_offset = fmaxl(0, fminl(x->chan_offset, x->l_chan - x->chans));
+    new_chans = fmaxl(1, fminl(new_chans, x->l_chan));
+    new_chans_offset = fmaxl(0, fminl(new_chans_offset, x->l_chan - new_chans));
+    if(new_chans == x->chans && new_chans_offset == x->chan_offset)
+        return;
+        
+    x->chans = new_chans;
+    x->chan_offset = new_chans_offset;
 
-    // Re-read waveform data based on updated channel configuration.
     ll_mcwaveform_reread(x);
 }
 
@@ -927,8 +919,11 @@ void ll_mcwaveform_line(t_ll_mcwaveform *x, double f){
         Set the display start position in ms.
 */
 void ll_mcwaveform_start(t_ll_mcwaveform *x, double f){
+    if(f == x->ms_list.start)
+        return;
+        
     x->ms_list.start = f;
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_reread(x);
 }
 
 /*
@@ -936,8 +931,11 @@ void ll_mcwaveform_start(t_ll_mcwaveform *x, double f){
         Set the display length in ms.
 */
 void ll_mcwaveform_length(t_ll_mcwaveform *x, double f){
+    if(f == x->ms_list.length)
+        return;
+        
     x->ms_list.length = f;
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_reread(x);
 }
 
 /*
@@ -945,6 +943,9 @@ void ll_mcwaveform_length(t_ll_mcwaveform *x, double f){
         Set the selection start time in ms.
 */
 void ll_mcwaveform_selstart(t_ll_mcwaveform *x, double f){
+    if(f == x->ms_list.sel_start)
+        return;
+        
     x->ms_list.sel_start = f;
     ll_mcwaveform_bang(x);
 }
@@ -954,6 +955,9 @@ void ll_mcwaveform_selstart(t_ll_mcwaveform *x, double f){
         Set the selection end time in ms.
 */
 void ll_mcwaveform_selend(t_ll_mcwaveform *x, double f){
+    if(f == x->ms_list.sel_end)
+        return;
+        
     x->ms_list.sel_end = f;
     ll_mcwaveform_bang(x);
 }
@@ -975,7 +979,7 @@ void ll_mcwaveform_zoom2sel(t_ll_mcwaveform *x){
 void ll_mcwaveform_sel_disp(t_ll_mcwaveform *x){
     x->ms_list.sel_start = x->ms_list.start;
     x->ms_list.sel_end = x->ms_list.start + x->ms_list.length;
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_reread(x);
 }
 
 /*
@@ -988,7 +992,7 @@ void ll_mcwaveform_sel_all(t_ll_mcwaveform *x){
 
     x->ms_list.sel_start = 0;
     x->ms_list.sel_end = x->l_length;
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_reread(x);
 }
 
 /*
@@ -1030,20 +1034,6 @@ void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view){
     t_jgraphics *g;
     g = (t_jgraphics*) patcherview_get_jgraphics(view);
     jbox_get_rect_for_view((t_object *)x, view, &rect);
-
-    // If display start or length has changed, redraw the waveform.
-    if ((x->ms_list.start != x->msold[0]) || (x->ms_list.length != x->msold[1])) {
-        x->msold[0] = x->ms_list.start;
-        x->msold[1] = x->ms_list.length;
-        x->wf_paint = 1;
-    }
-    
-    // If channels have changed, redraw the waveform.
-    if(x->chans != x->chans_old || x->chan_offset != x->chan_offset_old) {
-        x->wf_paint = 1;
-        x->chans_old = x->chans;
-        x->chan_offset_old = x->chan_offset;
-    }
 
     if (x->wf_paint)
         ll_mcwaveform_paint_wf(x, view, &rect);
@@ -1346,6 +1336,7 @@ void ll_mcwaveform_mousedown(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
                 else
                     x->ms_list.sel_end = cx;
             }
+            ll_mcwaveform_bang(x);
             break;
         }
         case MOUSE_MODE_LOOP: {
@@ -1356,6 +1347,8 @@ void ll_mcwaveform_mousedown(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
 
             x->ms_list.sel_start = cx - selected_half;
             x->ms_list.sel_end = cx + selected_half;
+            ll_mcwaveform_bang(x);
+            break;
         }
         default:
             // Handle other modes, if necessary, or do nothing.
@@ -1402,6 +1395,7 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
                 x->ms_list.sel_end = newXPosition;
                 x->ms_list.sel_start = s_ll_ccum.x * scaleFactor + x->ms_list.start;
             }
+            ll_mcwaveform_bang(x); // Update UI or state as necessary
             break;
         }
         case MOUSE_MODE_LOOP: {
@@ -1410,6 +1404,8 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
             double adjustedEnd = fmax(x->ms_list.sel_start + 0.0001, x->ms_list.sel_end + (-2 * s_ll_delta.y + s_ll_delta.x) * scaleFactor);
             x->ms_list.sel_start = adjustedStart;
             x->ms_list.sel_end = adjustedEnd;
+            ll_mcwaveform_bang(x); // Update UI or state as necessary
+
             break;
         }
         case MOUSE_MODE_MOVE: {
@@ -1417,6 +1413,9 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
             double moveYScale = 4 * s_ll_delta.y * scaleFactor;
             x->ms_list.length += moveYScale;
             x->ms_list.start -= deltaYXScale;
+//            ll_mcwaveform_reread(x); // Update UI or state as necessary
+            qelem_set(x->m_qelem);
+
             break;
         }
         case MOUSE_MODE_DRAW: {
@@ -1428,5 +1427,5 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
         default:
             break; // No action for default case
     }
-    ll_mcwaveform_bang(x); // Update UI or state as necessary
+//    ll_mcwaveform_bang(x); // Update UI or state as necessary
 }
