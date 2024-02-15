@@ -1,11 +1,16 @@
 # ppooll_externals
+(klaus filip & Joe Steccato)
 
-Max externals required for running [ppooll](https://github.com/ppooll-dev/ppooll):
+Max externals used in [ppooll](https://github.com/ppooll-dev/ppooll)
 
+- ll_number       
+    GUI number and (multi)slider in one box
+- ll_mcwaveform     
+    GUI waveform for multichannel soundfiles
 - ll_2dslider
+    GUI array of dots
 - ll_fastforward
-- ll_mcwaveform
-- ll_number
+    send to the header of a message
 
 
 ## Install and Build
