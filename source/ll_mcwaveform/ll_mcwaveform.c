@@ -242,7 +242,7 @@ void ext_main(void *r){
     CLASS_ATTR_DOUBLE(c,                "vzoom", 0, t_ll_mcwaveform, vzoom);
     CLASS_ATTR_LABEL(c,                 "vzoom", 0, "Vertical Zoom");
     CLASS_ATTR_FILTER_MIN(c,            "vzoom", 0.);
-    CLASS_ATTR_DEFAULT_SAVE_PAINT(c,    "vzoom", 0, "1");
+    CLASS_ATTR_DEFAULT_SAVE(c,          "vzoom", 0, "1");
     CLASS_ATTR_ACCESSORS(c,             "vzoom", NULL, (method)ll_mcwaveform_vzoom_set);
 
     //********** behavior
@@ -848,7 +848,7 @@ void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
                     new_chans = 0;
                 } else {
                     object_error((t_object *)x, "bad argument for message chans");
-                    return;
+                    return MAX_ERR_NONE;
                 }
                 break;
             case A_LONG:
@@ -858,11 +858,11 @@ void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
             case A_FLOAT:
                 // Float arguments not supported for this message.
                 object_error((t_object *)x, "bad argument for message chans");
-                return;
+                return MAX_ERR_NONE;
             default:
                 // Handle unexpected argument types.
                 object_error((t_object *)x, "unexpected argument type for message chans");
-                return;
+                return MAX_ERR_NONE;
         }
     }
     // Handle two arguments case -- set number of channels to display & channel offset.
@@ -873,7 +873,7 @@ void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
     else {
         // Handle invalid number of arguments or types.
         object_error((t_object *)x, "bad argument count or type for message chans");
-        return;
+        return MAX_ERR_NONE;
     }
 
     new_chans = fmaxl(0, fminl(new_chans, x->l_chan));
@@ -899,6 +899,7 @@ t_max_err ll_mcwaveform_vzoom_set(t_ll_mcwaveform *x, void *attr, long ac, t_ato
 
     x->vzoom = f;
     x->wf_paint = 1;
+    ll_mcwaveform_bang(x);
     return MAX_ERR_NONE;
 }
 
