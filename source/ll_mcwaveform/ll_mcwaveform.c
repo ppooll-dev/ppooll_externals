@@ -819,7 +819,6 @@ void ll_mcwaveform_setmode(t_ll_mcwaveform *x, void *attr, long ac, t_atom *av) 
 */
 void ll_mcwaveform_mode_legacy(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
     if (ac && av) {
-        postatom(av);
         ll_mcwaveform_setmode(x, NULL, 1, av);
     } else {
         // Handle case where no valid arguments are provided
@@ -880,8 +879,8 @@ void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
     new_chans = fmaxl(0, fminl(new_chans, x->l_chan));
     new_chans_offset = fmaxl(0, fminl(new_chans_offset, x->l_chan - new_chans));
     if(new_chans == x->chans && new_chans_offset == x->chan_offset)
-        return;
-        
+        return MAX_ERR_NONE;
+
     x->chans = new_chans;
     x->chan_offset = new_chans_offset;
 
@@ -1268,7 +1267,6 @@ void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview){
 */
 void ll_mcwaveform_mouseenter(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
     x->stored_patcherview = patcherview;
-
     ll_mcwaveform_setmousecursor(x, patcherview);
 }
 
@@ -1396,7 +1394,6 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
             x->ms_list.sel_start = adjustedStart;
             x->ms_list.sel_end = adjustedEnd;
             ll_mcwaveform_bang(x); // Update UI or state as necessary
-
             break;
         }
         case MOUSE_MODE_MOVE: {
