@@ -29,6 +29,16 @@
 #include <stdio.h>
 #include <math.h>
 
+#ifdef _WIN32
+    // Windows-specific modifiers
+    #define MOUSE_MOD_1 eControlKey
+    #define MOUSE_MOD_2 eAltKey
+#else
+    // macOS-specific modifiers
+    #define MOUSE_MOD_1 eCommandKey
+    #define MOUSE_MOD_2 eControlKey
+#endif
+
 static t_class  *s_ll_mcwaveform_class = 0;
 static t_pt s_ll_mcwaveform_cum; // mouse tracking
 static t_pt s_ll_ccum;
@@ -39,8 +49,13 @@ typedef enum {
     MOUSE_MODE_SELECT,
     MOUSE_MODE_LOOP,
     MOUSE_MODE_MOVE,
-    MOUSE_MODE_DRAW
+    MOUSE_MODE_DRAW // not used
 } MouseMode;
+
+typedef enum {
+    SEL_KEEP_START_END,
+    SEL_KEEP_LENGTH
+} SelectionKeepMode;
 
 typedef struct {
     double start;
@@ -48,7 +63,6 @@ typedef struct {
     double sel_start;
     double sel_end;
 } MSList;
-
 
 static t_fourcc s_types[20];
 static short s_numtypes = 0;
@@ -68,7 +82,13 @@ typedef struct _ll_mcwaveform
     t_jrgba     ll_linecolor;
     char        inv_sel_color;
 
-    char        mouse_mode; // none, select, loop, move, draw(?)
+    char        mouse_mode;     // none, select, loop, move
+    char        set_mode;       // none, select, loop, move
+    char        use_modifiers;  // Flag to use keyboard modifiers.
+    
+    char        mod1_mode;      // default, select, loop, move
+    char        mod2_mode;      // default, select, loop, move
+    
     short       allow_drag; // bool, allow drag and drop audio files
 
     short       sf_mode;    // bool, is soundfile mode
@@ -80,6 +100,9 @@ typedef struct _ll_mcwaveform
 
     long        chans;
     long        chan_offset;
+    
+    char        sel_keep_mode;
+    char        set_only_mode;
 
     // Source Buffer/File Properties
     long        l_chan;         // Total channels
@@ -156,6 +179,8 @@ void ll_mcwaveform_bang(t_ll_mcwaveform *x);
 void ll_mcwaveform_int(t_ll_mcwaveform *x, long n);
 void ll_mcwaveform_float(t_ll_mcwaveform *x, double f);
 void ll_mcwaveform_list(t_ll_mcwaveform *x, t_symbol *s, short ac, t_atom *av);
+void ll_mcwaveform_setlist(t_ll_mcwaveform *x, t_symbol *s, short ac, t_atom *av);
+
 
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ messages
 // Mode
@@ -177,12 +202,15 @@ void ll_mcwaveform_sel_all(t_ll_mcwaveform *x);
 void ll_mcwaveform_sel_disp(t_ll_mcwaveform *x);
 
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ paint
-void ll_mcwaveform_reread(t_ll_mcwaveform *x);
+void ll_mcwaveform_updatebounds(t_ll_mcwaveform *x, char should_output);
+void ll_mcwaveform_reread(t_ll_mcwaveform *x, char should_output);
+
 void ll_mcwaveform_paint(t_ll_mcwaveform *x, t_object *view);
 void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect);
 
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ mouse & key
-void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview);
+void ll_mcwaveform_applymodifiers(t_ll_mcwaveform *x, long modifiers);
+void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview, long modifiers);
 void ll_mcwaveform_mouseenter(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
 void ll_mcwaveform_mouseleave(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
 void ll_mcwaveform_mousedown(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers);
@@ -225,6 +253,8 @@ void ext_main(void *r){
     class_addmethod(c, (method)ll_mcwaveform_sel_disp,      "sel_disp",   0);
     class_addmethod(c, (method)ll_mcwaveform_full,          "full",       0);
     class_addmethod(c, (method)ll_mcwaveform_reread,        "reread",     0);
+    
+    class_addmethod(c, (method)ll_mcwaveform_setlist,       "setlist",    A_GIMME, 0);
 
     class_addmethod(c, (method)ll_mcwaveform_notify,        "notify",     A_CANT, 0);
     
@@ -262,17 +292,45 @@ void ext_main(void *r){
     //********** behavior
     CLASS_STICKY_ATTR(c, "category", 0, "Behavior");
 
-    CLASS_ATTR_CHAR(c,                  "setmode", 0, t_ll_mcwaveform, mouse_mode);
+    CLASS_ATTR_CHAR(c,                  "setmode", 0, t_ll_mcwaveform, set_mode);
     CLASS_ATTR_ACCESSORS(c,             "setmode", NULL, (method)ll_mcwaveform_setmode);
     CLASS_ATTR_FILTER_CLIP(c,           "setmode", 0, 3);
     CLASS_ATTR_STYLE_LABEL(c,           "setmode", 0, "enum", "Click Mode");
     CLASS_ATTR_ENUMINDEX(c,             "setmode", 0, "none select loop move");
     CLASS_ATTR_DEFAULT_SAVE_PAINT(c,    "setmode", 0, "1");
+    
+    CLASS_ATTR_CHAR(c,                  "mod1mode", 0, t_ll_mcwaveform, mod1_mode);
+    CLASS_ATTR_FILTER_CLIP(c,           "mod1mode", 0, 3);
+    CLASS_ATTR_STYLE_LABEL(c,           "mod1mode", 0, "enum", "Modifier 1 Mode");
+    CLASS_ATTR_ENUMINDEX(c,             "mod1mode", 0, "default select loop move");
+    CLASS_ATTR_DEFAULT_SAVE_PAINT(c,    "mod1mode", 0, "3");
+    
+    CLASS_ATTR_CHAR(c,                  "mod2mode", 0, t_ll_mcwaveform, mod2_mode);
+    CLASS_ATTR_FILTER_CLIP(c,           "mod2mode", 0, 3);
+    CLASS_ATTR_STYLE_LABEL(c,           "mod2mode", 0, "enum", "Modifier 2 Mode");
+    CLASS_ATTR_ENUMINDEX(c,             "mod2mode", 0, "default select loop move");
+    CLASS_ATTR_DEFAULT_SAVE_PAINT(c,    "mod2mode", 0, "2");
+    
+    CLASS_ATTR_CHAR(c,                  "modifiers", 0, t_ll_mcwaveform, use_modifiers);
+    CLASS_ATTR_STYLE(c,                 "modifiers", 0, "onoff");
+    CLASS_ATTR_STYLE_LABEL(c,           "modifiers", 0, "onoff", "Modifiers Change Mode");
+    CLASS_ATTR_DEFAULT_SAVE(c,          "modifiers", 0, "0");
 
     CLASS_ATTR_CHAR(c,                  "allowdrag", 0, t_ll_mcwaveform, allow_drag);
     CLASS_ATTR_STYLE(c,                 "allowdrag", 0, "onoff");
     CLASS_ATTR_STYLE_LABEL(c,           "allowdrag", 0, "onoff", "Allow Drag & Drop");
     CLASS_ATTR_DEFAULT_SAVE(c,          "allowdrag", 0, "1");
+    
+    CLASS_ATTR_CHAR(c,                  "setonly", 0, t_ll_mcwaveform, set_only_mode);
+    CLASS_ATTR_STYLE(c,                 "setonly", 0, "onoff");
+    CLASS_ATTR_STYLE_LABEL(c,           "setonly", 0, "onoff", "Set Only Mode");
+    CLASS_ATTR_DEFAULT_SAVE(c,          "setonly", 0, "0");
+    
+    CLASS_ATTR_CHAR(c,                  "selectkeep", 0, t_ll_mcwaveform, sel_keep_mode);
+    CLASS_ATTR_FILTER_CLIP(c,           "selectkeep", 0, 1);
+    CLASS_ATTR_STYLE_LABEL(c,           "selectkeep", 0, "enum", "Selection Keep Mode");
+    CLASS_ATTR_ENUMINDEX(c,             "selectkeep", 0, "start/end length");
+    CLASS_ATTR_DEFAULT_SAVE_PAINT(c,    "selectkeep", 0, "0");
     
     CLASS_ATTR_DOUBLE(c,                "reread_rate", 0, t_ll_mcwaveform, reread_rate);
     CLASS_ATTR_LABEL(c,                 "reread_rate", 0, "Re-read rate (ms)");
@@ -450,7 +508,7 @@ void ll_mcwaveform_free(t_ll_mcwaveform *x){
 }
 
 void ll_mcwaveform_qtask(t_ll_mcwaveform *x, t_symbol *s, short argc, t_atom *argv){
-    ll_mcwaveform_reread(x);
+    ll_mcwaveform_reread(x,1);
 }
 
 void ll_mcwaveform_task(t_ll_mcwaveform *x){
@@ -476,10 +534,10 @@ t_max_err ll_mcwaveform_notify(t_ll_mcwaveform *x, t_symbol *s, t_symbol *msg, v
             x->chan_offset = 0;
 
             x->sf_mode = 0;
-            ll_mcwaveform_reread(x);
+            ll_mcwaveform_reread(x,1);
         }else{
             // post("buffer added?");  // Buffer added
-            ll_mcwaveform_reread(x);
+            ll_mcwaveform_reread(x,1);
         }
     }else if(msg == gensym("buffer_modified")){
         // "buffer_reread" flag -- reread only every x ms (reread_rate)
@@ -636,7 +694,7 @@ void ll_mcwaveform_openfile(t_ll_mcwaveform *x, char *filename, short path, t_fo
     outlet_anything(x->ll_box.b_ob.o_outlet, gensym("sf"), 4, sfinfo_list);
     
     x->sf_mode = 1;
-    ll_mcwaveform_reread(x);
+    ll_mcwaveform_reread(x,1);
 }
 
 /*
@@ -684,7 +742,7 @@ void ll_mcwaveform_sf(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av){
     }
     
     x->sf_mode = 1;
-    ll_mcwaveform_reread(x);
+    ll_mcwaveform_reread(x,1);
 }
 
 /*
@@ -709,7 +767,7 @@ void ll_mcwaveform_set(t_ll_mcwaveform *x, t_symbol *s){
     x->ms_list.length = x->l_length;
     
     x->sf_mode = 0;
-    ll_mcwaveform_reread(x);
+    ll_mcwaveform_reread(x,1);
 }
 
 
@@ -727,31 +785,7 @@ void ll_mcwaveform_set(t_ll_mcwaveform *x, t_symbol *s){
         Output list of display/selection values.
 */
 void ll_mcwaveform_bang(t_ll_mcwaveform *x){
-    // Ensure start is within [0, l_length - 0.5]
-    x->ms_list.start = fmax(0, fmin(x->ms_list.start, x->l_length - 0.5));
-
-    // Adjust end to not exceed l_length starting from start, and ensure a minimum value
-    double maxEndValue = x->l_length - x->ms_list.start;
-    double minEndValue = 20 / x->l_srms;
-    x->ms_list.length = fmax(minEndValue, fmin(x->ms_list.length, maxEndValue));
-
-    // Clamp sel_start and sel_end within the allowed range directly
-    x->ms_list.sel_start = fmax(0, x->ms_list.sel_start);
-    x->ms_list.sel_end = fmin(x->l_length, x->ms_list.sel_end);
-    
-    double tempArray[4] = {
-        x->ms_list.start,
-        x->ms_list.length,
-        x->ms_list.sel_start,
-        x->ms_list.sel_end
-    };
-    t_atom myList[4];
-    atom_setdouble_array(4, myList, 4, tempArray);
-    
-    // Output mslist
-    outlet_anything(x->ll_box.b_ob.o_outlet, gensym("mslist"), 4, myList);
-    
-    jbox_redraw(&x->ll_box);
+    ll_mcwaveform_updatebounds(x, 1); // always send values out of this object
 }
 
 void ll_mcwaveform_int(t_ll_mcwaveform *x, long n){
@@ -785,9 +819,37 @@ void ll_mcwaveform_list(t_ll_mcwaveform *x, t_symbol *s, short ac, t_atom *av){
         
         // Bounds check & send "mslist" message to outlet.
         if(needs_repaint)
-            ll_mcwaveform_reread(x);
+            ll_mcwaveform_reread(x, 1);
         else
             ll_mcwaveform_bang(x);
+    }
+}
+
+/*
+   setlist [Max "list" Input]
+        Set the start, length, sel_start and sel_end without outputting values.
+*/
+void ll_mcwaveform_setlist(t_ll_mcwaveform *x, t_symbol *s, short ac, t_atom *av){
+    double tempArray[4];
+
+    // Assuming ac is at least 4 and av points to an array of t_atom with at least 4 elements.
+    if (ac >= 4) {
+        atom_getdouble_array(ac, av, 4, tempArray);
+        
+        // Display selection has changed --  we need to repaint & reread the waveform.
+        short needs_repaint = x->ms_list.start != tempArray[0] || x->ms_list.length != tempArray[1];
+        
+        // Assign the values from tempArray to the respective fields in ms_list.
+        x->ms_list.start = tempArray[0];
+        x->ms_list.length = tempArray[1];
+        x->ms_list.sel_start = tempArray[2];
+        x->ms_list.sel_end = tempArray[3];
+        
+        // Bounds check & send "mslist" message to outlet.
+        if(needs_repaint)
+            ll_mcwaveform_reread(x, 0);
+        else
+            ll_mcwaveform_updatebounds(x, 0);
     }
 }
 
@@ -826,9 +888,11 @@ t_max_err ll_mcwaveform_setmode(t_ll_mcwaveform *x, void *attr, long ac, t_atom 
             object_error((t_object *)x, "unsupported argument type for 'setmode'");
             return;
         }
+        x->set_mode = mode_val;
         x->mouse_mode = mode_val;
+
         if (x->stored_patcherview) {
-            ll_mcwaveform_setmousecursor(x, x->stored_patcherview);
+            ll_mcwaveform_setmousecursor(x, x->stored_patcherview, 0);
         }
     } else {
         object_error((t_object *)x, "no arguments provided for 'setmode'");
@@ -936,7 +1000,7 @@ t_max_err ll_mcwaveform_vzoom_set(t_ll_mcwaveform *x, void *attr, long ac, t_ato
 */
 void ll_mcwaveform_line(t_ll_mcwaveform *x, double f){
     x->linepos = f < 0. ? -1. : f;
-    ll_mcwaveform_bang(x);
+    jbox_redraw(&x->ll_box);
 }
 
 /*
@@ -947,7 +1011,7 @@ void ll_mcwaveform_start(t_ll_mcwaveform *x, double f){
     if(f == x->ms_list.start)
         return;
     x->ms_list.start = f;
-    ll_mcwaveform_reread(x);
+    ll_mcwaveform_reread(x, !x->set_only_mode);
 }
 
 /*
@@ -958,7 +1022,9 @@ void ll_mcwaveform_length(t_ll_mcwaveform *x, double f){
     if(f == x->ms_list.length)
         return;
     x->ms_list.length = f;
-    ll_mcwaveform_reread(x);}
+    
+    ll_mcwaveform_reread(x, !x->set_only_mode);
+}
 
 /*
     selstart [Max Message]
@@ -967,8 +1033,14 @@ void ll_mcwaveform_length(t_ll_mcwaveform *x, double f){
 void ll_mcwaveform_selstart(t_ll_mcwaveform *x, double f){
     if(f == x->ms_list.sel_start)
         return;
+    
+    if(x->sel_keep_mode == SEL_KEEP_LENGTH){
+        double delta = f - x->ms_list.sel_start;
+        x->ms_list.sel_end += delta;
+    }
+
     x->ms_list.sel_start = f;
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_updatebounds(x, !x->set_only_mode);
 }
 
 /*
@@ -978,8 +1050,14 @@ void ll_mcwaveform_selstart(t_ll_mcwaveform *x, double f){
 void ll_mcwaveform_selend(t_ll_mcwaveform *x, double f){
     if(f == x->ms_list.sel_end)
         return;
+    
+    if(x->sel_keep_mode == SEL_KEEP_LENGTH){
+        double delta = f - x->ms_list.sel_end;
+        x->ms_list.sel_start += delta;
+    }
+    
     x->ms_list.sel_end = f;
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_updatebounds(x, !x->set_only_mode);
 }
 
 /*
@@ -990,7 +1068,7 @@ void ll_mcwaveform_zoom2sel(t_ll_mcwaveform *x){
     x->ms_list.start = x->ms_list.sel_start;
     x->ms_list.length = x->ms_list.sel_end - x->ms_list.sel_start;
     
-    ll_mcwaveform_reread(x);
+    ll_mcwaveform_reread(x,1);
 }
 
 /*
@@ -1001,7 +1079,7 @@ void ll_mcwaveform_sel_disp(t_ll_mcwaveform *x){
     x->ms_list.sel_start = x->ms_list.start;
     x->ms_list.sel_end = x->ms_list.start + x->ms_list.length;
     
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_updatebounds(x, 1);
 }
 
 /*
@@ -1014,7 +1092,7 @@ void ll_mcwaveform_sel_all(t_ll_mcwaveform *x){
     x->ms_list.sel_start = 0;
     x->ms_list.sel_end = x->l_length;
     
-    ll_mcwaveform_reread(x);
+    ll_mcwaveform_reread(x, 1);
 }
 
 /*
@@ -1025,7 +1103,7 @@ void ll_mcwaveform_full(t_ll_mcwaveform *x){
     x->ms_list.start = 0;
     x->ms_list.length = x->l_length;
     
-    ll_mcwaveform_reread(x);
+    ll_mcwaveform_reread(x, 1);
 }
 
 
@@ -1106,10 +1184,45 @@ t_max_err ll_mcwaveform_inv_sel_color_set(t_ll_mcwaveform *x, void *attr, long a
         Update object drawing, including the waveform
         In sf_mode, we set sf_read to re-read the audio file into the buffer on drawing
 */
-void ll_mcwaveform_reread(t_ll_mcwaveform *x){
+void ll_mcwaveform_reread(t_ll_mcwaveform *x, char should_output){
     x->sf_read = 1;
     jbox_invalidate_layer((t_object *)x, NULL, gensym("wf"));
-    ll_mcwaveform_bang(x);
+    ll_mcwaveform_updatebounds(x, should_output);
+}
+
+/*
+    updatebounds
+        Check bounds for display and selection
+        Redraw if necessary,
+        Output list of display/selection values.
+*/
+void ll_mcwaveform_updatebounds(t_ll_mcwaveform *x, char should_output){
+    // Ensure start is within [0, l_length - 0.5]
+    x->ms_list.start = fmax(0, fmin(x->ms_list.start, x->l_length - 0.5));
+
+    // Adjust end to not exceed l_length starting from start, and ensure a minimum value
+    double maxEndValue = x->l_length - x->ms_list.start;
+    double minEndValue = 20 / x->l_srms;
+    x->ms_list.length = fmax(minEndValue, fmin(x->ms_list.length, maxEndValue));
+
+    // Clamp sel_start and sel_end within the allowed range directly
+    x->ms_list.sel_start = fmax(0, x->ms_list.sel_start);
+    x->ms_list.sel_end = fmin(x->l_length, x->ms_list.sel_end);
+    
+    double tempArray[4] = {
+        x->ms_list.start,
+        x->ms_list.length,
+        x->ms_list.sel_start,
+        x->ms_list.sel_end
+    };
+    t_atom myList[4];
+    atom_setdouble_array(4, myList, 4, tempArray);
+    
+    // Output mslist
+    if(should_output)
+        outlet_anything(x->ll_box.b_ob.o_outlet, gensym("mslist"), 4, myList);
+    
+    jbox_redraw(&x->ll_box);
 }
 
 /*
@@ -1318,13 +1431,26 @@ void ll_mcwaveform_paint_wf(t_ll_mcwaveform *x, t_object *view, t_rect *rect) {
 
 ************************************************************************************************ */
 
+void ll_mcwaveform_applymodifiers(t_ll_mcwaveform *x, long modifiers){
+    if(!x->use_modifiers)
+        return;
+    
+    if (x->mod1_mode > 0 && (modifiers & MOUSE_MOD_1)) {
+        x->mouse_mode = x->mod1_mode;
+    } else if (x->mod2_mode > 0 && (modifiers & MOUSE_MOD_2)) {
+        x->mouse_mode = x->mod2_mode;
+    }else{
+        x->mouse_mode = x->set_mode;
+    }
+}
+
 /*
     setmousecursor
         Set cursor appearance.
 */
-void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview){
-    t_rect rect;
+void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview, long modifiers){
     t_jmouse_cursortype cursorType = JMOUSE_CURSOR_ARROW; // Default cursor type
+    ll_mcwaveform_applymodifiers(x, modifiers);
     switch (x->mouse_mode) {
         case MOUSE_MODE_MOVE:
             cursorType = JMOUSE_CURSOR_DRAGGINGHAND;
@@ -1349,7 +1475,7 @@ void ll_mcwaveform_setmousecursor(t_ll_mcwaveform *x, t_object *patcherview){
 */
 void ll_mcwaveform_mouseenter(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
     x->stored_patcherview = patcherview;
-    ll_mcwaveform_setmousecursor(x, patcherview);
+    ll_mcwaveform_setmousecursor(x, patcherview, modifiers);
 }
 
 /*
@@ -1358,7 +1484,7 @@ void ll_mcwaveform_mouseenter(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt
 */
 void ll_mcwaveform_mouseleave(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers){
     x->stored_patcherview = patcherview;
-    ll_mcwaveform_setmousecursor(x, patcherview);
+    ll_mcwaveform_setmousecursor(x, patcherview, modifiers);
 }
 
 /*
@@ -1366,7 +1492,8 @@ void ll_mcwaveform_mouseleave(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt
         When the cursor is hovering over the object, change the mouse cursor appearance.
 */
 void ll_mcwaveform_mousemove(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers) {
-//    ll_mcwaveform_setmousecursor(x, patcherview, pt, modifiers);
+    // Remember to call setmousecursor or any other necessary function at the end
+    ll_mcwaveform_setmousecursor(x, patcherview, modifiers);
 }
 
 /*
@@ -1441,6 +1568,8 @@ void ll_mcwaveform_mouseup(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, l
         On mouse drag, adjust selection and displayed amount of waveform.
 */
 void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers) {
+    ll_mcwaveform_setmousecursor(x, patcherview, modifiers);
+    
     char shift = modifiers / 2 % 2;
     s_ll_delta.x = pt.x - s_ll_mcwaveform_cum.x;
     s_ll_delta.y = shift ? 0 : pt.y - s_ll_mcwaveform_cum.y;
@@ -1469,6 +1598,7 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
             // Adjust loop points based on mouse movement, ensuring loop end is always after loop start
             double adjustedStart = fmin(x->ms_list.sel_end - 0.0001, x->ms_list.sel_start + deltaYXScale);
             double adjustedEnd = fmax(x->ms_list.sel_start + 0.0001, x->ms_list.sel_end + (-2 * s_ll_delta.y + s_ll_delta.x) * scaleFactor);
+
             x->ms_list.sel_start = adjustedStart;
             x->ms_list.sel_end = adjustedEnd;
             
@@ -1481,7 +1611,7 @@ void ll_mcwaveform_mousedrag(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
             x->ms_list.length += moveYScale;
             x->ms_list.start -= deltaYXScale;
             
-            ll_mcwaveform_reread(x);
+            ll_mcwaveform_reread(x,1);
             break;
         }
         case MOUSE_MODE_DRAW: {

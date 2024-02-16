@@ -88,6 +88,31 @@
 						"assistshowspatchername" : 0,
 						"boxes" : [ 							{
 								"box" : 								{
+									"id" : "obj-7",
+									"linecount" : 2,
+									"maxclass" : "comment",
+									"numinlets" : 1,
+									"numoutlets" : 0,
+									"patching_rect" : [ 455.5, 334.0, 196.5, 33.0 ],
+									"text" : "keep either the loop length or start/end points"
+								}
+
+							}
+, 							{
+								"box" : 								{
+									"attr" : "selectkeep",
+									"id" : "obj-38",
+									"maxclass" : "attrui",
+									"numinlets" : 1,
+									"numoutlets" : 1,
+									"outlettype" : [ "" ],
+									"parameter_enable" : 0,
+									"patching_rect" : [ 456.0, 369.0, 196.0, 22.0 ]
+								}
+
+							}
+, 							{
+								"box" : 								{
 									"id" : "obj-5",
 									"maxclass" : "message",
 									"numinlets" : 2,
@@ -339,6 +364,7 @@
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 269.0, 401.0, 383.0, 160.0 ],
+									"selectkeep" : 1,
 									"setmode" : 3,
 									"varname" : "mcwaveform"
 								}
@@ -393,6 +419,13 @@
 								"patchline" : 								{
 									"destination" : [ "obj-5", 1 ],
 									"source" : [ "obj-3", 0 ]
+								}
+
+							}
+, 							{
+								"patchline" : 								{
+									"destination" : [ "obj-3", 0 ],
+									"source" : [ "obj-38", 0 ]
 								}
 
 							}
@@ -522,6 +555,19 @@
 						"showontab" : 1,
 						"assistshowspatchername" : 0,
 						"boxes" : [ 							{
+								"box" : 								{
+									"attr" : "modifiers",
+									"id" : "obj-38",
+									"maxclass" : "attrui",
+									"numinlets" : 1,
+									"numoutlets" : 1,
+									"outlettype" : [ "" ],
+									"parameter_enable" : 0,
+									"patching_rect" : [ 493.0, 640.0, 150.0, 22.0 ]
+								}
+
+							}
+, 							{
 								"box" : 								{
 									"attr" : "inv_sel_color",
 									"id" : "obj-37",
@@ -1067,7 +1113,7 @@
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 152.0, 618.0, 287.0, 22.0 ],
-									"text" : "mslist 0. 3478.45805 0. 0."
+									"text" : "mslist 0. 3478.45805 821.933299 1466.764948"
 								}
 
 							}
@@ -1831,6 +1877,7 @@
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 152.0, 445.0, 383.0, 160.0 ],
+									"selectkeep" : 1,
 									"varname" : "mcwaveform"
 								}
 
@@ -1929,16 +1976,7 @@
 							}
 , 							{
 								"patchline" : 								{
-									"destination" : [ "obj-3", 0 ],
-									"order" : 0,
-									"source" : [ "obj-30", 0 ]
-								}
-
-							}
-, 							{
-								"patchline" : 								{
 									"destination" : [ "obj-34", 1 ],
-									"order" : 1,
 									"source" : [ "obj-30", 0 ]
 								}
 
@@ -1968,6 +2006,13 @@
 								"patchline" : 								{
 									"destination" : [ "obj-3", 0 ],
 									"source" : [ "obj-37", 0 ]
+								}
+
+							}
+, 							{
+								"patchline" : 								{
+									"destination" : [ "obj-3", 0 ],
+									"source" : [ "obj-38", 0 ]
 								}
 
 							}
