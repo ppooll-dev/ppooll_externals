@@ -31,12 +31,12 @@
 
 #ifdef _WIN32
     // Windows-specific modifiers
-    #define MOUSE_MOD_1 eControlKey
-    #define MOUSE_MOD_2 eAltKey
+    #define MOD_KEY_1 eControlKey
+    #define MOD_KEY_2 eAltKey
 #else
     // macOS-specific modifiers
-    #define MOUSE_MOD_1 eCommandKey
-    #define MOUSE_MOD_2 eControlKey
+    #define MOD_KEY_1 eCommandKey
+    #define MOD_KEY_2 eControlKey
 #endif
 
 static t_class  *s_ll_mcwaveform_class = 0;
@@ -172,7 +172,7 @@ t_max_err ll_mcwaveform_inv_sel_color_set(t_ll_mcwaveform *x, void *attr, long a
 t_max_err ll_mcwaveform_setmode(t_ll_mcwaveform *x, void *attr, long ac, t_atom *av);
 
 // Chans
-void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av);
+t_max_err ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av);
 
 // ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ input types
 void ll_mcwaveform_bang(t_ll_mcwaveform *x);
@@ -882,11 +882,11 @@ t_max_err ll_mcwaveform_setmode(t_ll_mcwaveform *x, void *attr, long ac, t_atom 
             else if (strcmp(sym->s_name, "draw") == 0)      mode_val = MOUSE_MODE_DRAW;
             else {
                 object_error((t_object *)x, "unsupported mode: %s", sym->s_name);
-                return;
+                return MAX_ERR_NONE;
             }
         } else {
             object_error((t_object *)x, "unsupported argument type for 'setmode'");
-            return;
+            return MAX_ERR_NONE;
         }
         x->set_mode = mode_val;
         x->mouse_mode = mode_val;
@@ -923,7 +923,7 @@ void ll_mcwaveform_mode_legacy(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom 
         number: show the first "n" channels
         list (2 numbers): show "n" channels offset by the 2nd number arg
 */
-void ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
+t_max_err ll_mcwaveform_chans(t_ll_mcwaveform *x, t_symbol *s, long ac, t_atom *av) {
     // Handle single argument case -- set number of channels to display.
     long new_chans = 0;
     long new_chans_offset = 0;
@@ -1435,9 +1435,9 @@ void ll_mcwaveform_applymodifiers(t_ll_mcwaveform *x, long modifiers){
     if(!x->use_modifiers)
         return;
     
-    if (x->mod1_mode > 0 && (modifiers & MOUSE_MOD_1)) {
+    if (x->mod1_mode > 0 && (modifiers & MOD_KEY_1)) {
         x->mouse_mode = x->mod1_mode;
-    } else if (x->mod2_mode > 0 && (modifiers & MOUSE_MOD_2)) {
+    } else if (x->mod2_mode > 0 && (modifiers & MOD_KEY_2)) {
         x->mouse_mode = x->mod2_mode;
     }else{
         x->mouse_mode = x->set_mode;
@@ -1492,7 +1492,6 @@ void ll_mcwaveform_mouseleave(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt
         When the cursor is hovering over the object, change the mouse cursor appearance.
 */
 void ll_mcwaveform_mousemove(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt, long modifiers) {
-    // Remember to call setmousecursor or any other necessary function at the end
     ll_mcwaveform_setmousecursor(x, patcherview, modifiers);
 }
 
@@ -1511,7 +1510,7 @@ void ll_mcwaveform_mousedown(t_ll_mcwaveform *x, t_object *patcherview, t_pt pt,
     
     switch (x->mouse_mode) {
         case MOUSE_MODE_DRAW: {
-            // In "draw" mode, calculate and output mouse position within waveform.
+            // In "draw" mode, calculate and output mouse position within waveform (for testing).
             t_atom cx;
             double relativeX = pt.x * x->ms_list.length / rect.width + x->ms_list.start;
             atom_setfloat(&cx, relativeX);
