@@ -1,3 +1,4 @@
+cmake_minimum_required(VERSION 3.10)
 project(ll_2dslider)
 
 set(CMAKE_OSX_ARCHITECTURES x86_64;arm64)
